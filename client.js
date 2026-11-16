@@ -9,22 +9,25 @@ window.__ModuleLoader__.load({
     const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
     const RECORD_PATH = '/dsh-clipchat/record'
     const MODELS_PATH = '/dsh-clipchat/models'
+    const SEARCH_PATH = '/dsh-clipchat/search'
     const FOLLOW_MODEL = 'follow'
     const HISTORY_LIMIT = 12
     const RECENT_LIMIT = 3
+    const SEARCH_LIMIT = 20
 
+    /* Constants and locale dictionaries. */
     const zh = {
       ask: '问这段',
       title: '滑词对话',
       close: '关闭',
-      placeholder: '就这段提问（Enter 发送，Shift+Enter 换行）',
-      preview: '选段',
+      placeholder: '直接问，或选一个快问',
+      inputHint: 'Enter 发送，Shift+Enter 换行',
       empty: '（未读到选段）',
       send: '发送',
-      sending: '回答中…',
       thinking: '正在回答…',
       tokensIn: '输入',
       tokensOut: '输出',
+      noTokens: 'token —',
       failed: '请求失败，请重试',
       network: '网络异常，请重试',
       aborted: '已停止，可重新发送',
@@ -46,25 +49,47 @@ window.__ModuleLoader__.load({
       recorded: '已留痕',
       records: '留痕',
       backToMain: '带回主线',
-      previousQa: '此前问答',
       inserted: '已插入',
       insertFailed: '无法插入，请手动复制',
       currentSelection: '当前选段',
       deleteRecord: '删除',
       noRecords: '本会话暂无留痕',
+      recordsSession: '本会话',
+      recordsAll: '全部会话',
+      searchPlaceholder: '搜索全部留痕…',
+      searchEmpty: '没有匹配的留痕',
+      searchLoading: '搜索中…',
+      searchFailed: '搜索失败，请重试',
+      searchTruncated: '结果较多，仅显示最新部分',
+      copy: '复制',
+      copied: '已复制',
+      insertToMain: '插入主输入框',
+      expandAnswer: '展开',
+      collapseAnswer: '收起',
+      threadHint: '问一句，这段话就会留在原文上。',
+      threadHintSub: '也可以点上面的快问；直接关掉不会留痕。',
+      generating: '生成中…',
+      presetExplain: '解释这段',
+      presetExplainQ: '解释这段',
+      presetTranslate: '翻译',
+      presetTranslateQ: '把这段翻译成英文',
+      presetCritique: '找问题',
+      presetCritiqueQ: '这段里有没有错误或风险？',
+      presetExample: '举个例子',
+      presetExampleQ: '举个例子',
     }
     const en = {
       ask: 'Ask about this',
       title: 'Clipchat',
       close: 'Close',
-      placeholder: 'Ask about this passage (Enter to send, Shift+Enter for a new line)',
-      preview: 'Selection',
+      placeholder: 'Ask, or pick a quick question',
+      inputHint: 'Enter to send, Shift+Enter for a new line',
       empty: '(no selected text)',
       send: 'Send',
-      sending: 'Answering…',
       thinking: 'Answering…',
       tokensIn: 'in',
       tokensOut: 'out',
+      noTokens: 'token —',
       failed: 'Request failed. Try again.',
       network: 'Network error. Try again.',
       aborted: 'Stopped. You can send again.',
@@ -86,41 +111,94 @@ window.__ModuleLoader__.load({
       recorded: 'Kept',
       records: 'Kept',
       backToMain: 'Send to main',
-      previousQa: 'Earlier Q&A',
       inserted: 'Inserted',
       insertFailed: 'Could not insert. Copy manually.',
       currentSelection: 'This passage',
       deleteRecord: 'Delete',
       noRecords: 'No kept answers yet',
+      recordsSession: 'This session',
+      recordsAll: 'All sessions',
+      searchPlaceholder: 'Search all kept answers…',
+      searchEmpty: 'No matching kept answers',
+      searchLoading: 'Searching…',
+      searchFailed: 'Search failed. Try again.',
+      searchTruncated: 'More matches than shown; only the newest are listed',
+      copy: 'Copy',
+      copied: 'Copied',
+      insertToMain: 'Insert into main',
+      expandAnswer: 'Expand',
+      collapseAnswer: 'Collapse',
+      threadHint: 'Ask once and the passage stays marked in the reply.',
+      threadHintSub: 'Or pick a quick question above. Closing without asking leaves nothing.',
+      generating: 'Generating…',
+      presetExplain: 'Explain',
+      presetExplainQ: 'Explain this passage',
+      presetTranslate: 'Translate',
+      presetTranslateQ: 'Translate this passage into English',
+      presetCritique: 'Find issues',
+      presetCritiqueQ: 'Does this passage have any errors or risks?',
+      presetExample: 'Example',
+      presetExampleQ: 'Give an example',
     }
 
+    /* Styles. */
     const css = `
 .clipchat-menu{display:flex;align-items:center;gap:6px}
 .clipchat-menu__ask{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);cursor:pointer;border-radius:999px;padding:5px 10px}
 .clipchat-menu__ask:hover{background:var(--dsw-alias-button-floating-hover)}
-.clipchat-card{width:min(360px,calc(100vw - 24px));box-sizing:border-box;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:12px;box-shadow:var(--dsw-elevation-panel);padding:12px;display:flex;flex-direction:column;gap:8px}
-.clipchat-card__head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:600}
-.clipchat-card__close{border:none;background:transparent;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;border-radius:6px}
-.clipchat-card__close:hover{background:var(--dsw-alias-button-floating-hover)}
-.clipchat-card__label{opacity:.6;font-size:11px}
-.clipchat-card__selection{max-height:60px;overflow:auto;white-space:pre-wrap;border-radius:8px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));padding:6px 8px}
-.clipchat-card__answer{max-height:180px;overflow:auto;white-space:pre-wrap;line-height:1.5;border-radius:8px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.06));padding:6px 8px}
-.clipchat-card__answer:empty{display:none}
-.clipchat-card__composer{display:flex;gap:6px;align-items:flex-end}
-.clipchat-card__ta{flex:1;min-width:0;box-sizing:border-box;resize:none;border:1px solid var(--dsw-alias-border-l3);border-radius:8px;background:transparent;color:inherit;font:inherit;padding:6px 8px;overflow:hidden}
-.clipchat-card__send{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer;border-radius:8px;padding:6px 10px;white-space:nowrap}
-.clipchat-card__send:hover{background:var(--dsw-alias-button-floating-hover)}
-.clipchat-card__send:disabled{opacity:.5;cursor:default}
-.clipchat-card__tokens{opacity:.6;font-size:11px}
-.clipchat-card__modelrow{display:flex;align-items:center;gap:6px}
-.clipchat-card__model{flex:1;min-width:0;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:transparent;color:inherit;font:var(--dsw-font-xs-13);padding:3px 6px}
+.clipchat-card{width:min(600px,calc(100vw - 32px));max-height:min(520px,64vh);box-sizing:border-box;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:14px;box-shadow:var(--dsw-elevation-panel,0 12px 40px -12px rgba(0,0,0,.3));display:flex;flex-direction:column;animation:clipchat-pop .16s ease-out}
+@keyframes clipchat-pop{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.clipchat-card{animation:none}}
+.clipchat-card__bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary,#666)}
+.clipchat-card__mark{flex:none;font-size:12px;line-height:1;color:var(--dsw-alias-brand-primary,#2f6fed)}
+.clipchat-card__bar-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;line-height:1.5}
+.clipchat-card__close{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:4px 6px;border-radius:7px;transition:background .12s ease,color .12s ease}
+.clipchat-card__close:hover{background:var(--dsw-alias-button-floating-hover);color:var(--dsw-alias-label-primary)}
+.clipchat-card__presets{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 4px}
+.clipchat-card__preset{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-secondary,#666);border-radius:999px;padding:4px 11px;font:var(--dsw-font-xs-13);line-height:1.4;cursor:pointer;transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease}
+.clipchat-card__preset:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover);transform:translateY(-1px)}
+.clipchat-card__preset:disabled{opacity:.5;cursor:default}
+.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:4px 16px 10px}
+.clipchat-card__empty{display:flex;gap:10px;padding:18px 2px 10px}
+.clipchat-card__empty-mark{flex:none;font-size:26px;line-height:1;color:var(--dsw-alias-brand-primary,#2f6fed);opacity:.35}
+.clipchat-card__empty-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.clipchat-card__empty-title{font-size:13px;line-height:1.6}
+.clipchat-card__empty-sub{font-size:12px;line-height:1.5;opacity:.55}
+.clipchat-card__turn{position:relative;padding:12px 0 14px 14px;border-bottom:1px dashed var(--dsw-alias-border-l3)}
+.clipchat-card__turn:last-child{border-bottom:0}
+.clipchat-card__turn::before{content:'';position:absolute;left:0;top:16px;bottom:14px;width:2px;border-radius:2px;background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 26%, transparent)}
+.clipchat-card__q{font-size:12.5px;font-weight:600;line-height:1.5;margin-bottom:6px;white-space:pre-wrap}
+.clipchat-card__a{white-space:pre-wrap;line-height:1.7;font-size:13.5px;word-break:break-word}
+.clipchat-card__a code{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12.5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12));border-radius:4px;padding:1px 4px}
+.clipchat-card__cursor{display:inline-block;margin-left:1px;animation:clipchat-blink 1s step-end infinite}
+@keyframes clipchat-blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.clipchat-card__cursor{animation:none}}
+.clipchat-card__composer{display:flex;gap:8px;align-items:flex-end;padding:8px 16px;border-top:1px solid var(--dsw-alias-border-l3)}
+.clipchat-card__ta{flex:1;min-width:0;box-sizing:border-box;resize:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:13.5px;line-height:1.5;padding:8px 10px;min-height:36px;max-height:140px;overflow:auto;transition:border-color .12s ease,box-shadow .12s ease}
+.clipchat-card__ta:focus{outline:none;border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 50%, var(--dsw-alias-border-l3));box-shadow:0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 12%, transparent)}
+.clipchat-card__send{flex:none;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));font:inherit;font-size:15px;cursor:pointer;border-radius:10px;padding:0;transition:opacity .12s ease,transform .12s ease,background .12s ease}
+.clipchat-card__send:hover:not(:disabled){transform:translateY(-1px)}
+.clipchat-card__send:disabled{background:transparent;color:var(--dsw-alias-label-primary);opacity:.45;cursor:default}
+.clipchat-card__footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 16px 12px}
+.clipchat-card__modelwrap{position:relative}
+.clipchat-card__modelbtn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s ease,color .12s ease}
+.clipchat-card__modelbtn:hover{background:var(--dsw-alias-button-floating-hover);color:var(--dsw-alias-label-primary)}
+.clipchat-card__modelmenu{position:absolute;left:0;bottom:calc(100% + 6px);z-index:3;min-width:200px;max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:5px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));border:1px solid var(--dsw-alias-border-l3);border-radius:10px;box-shadow:var(--dsw-elevation-panel)}
+.clipchat-card__modelitem{flex:none;border:none;background:transparent;color:inherit;font:var(--dsw-font-xs-13);text-align:left;padding:7px 9px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .12s ease,color .12s ease}
+.clipchat-card__modelitem:hover{background:var(--dsw-alias-button-floating-hover)}
+.clipchat-card__modelitem.on{color:var(--dsw-alias-brand-primary,#2f6fed);background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 10%, transparent);font-weight:600}
+.clipchat-card__spacer{flex:1}
+.clipchat-card__tokens{font-size:11.5px;opacity:.55;font-variant-numeric:tabular-nums;white-space:nowrap}
 .clipchat-card__error{color:#d9544d;font-size:12px;white-space:pre-wrap}
-.clipchat-card__hint{opacity:.6;font-size:11px}
-.clipchat-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;padding:5px 9px}
-.clipchat-actions__btn:disabled{opacity:.55;cursor:default}
-.clipchat-card__records{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding-top:6px}
-.clipchat-card__record{border:1px solid var(--dsw-alias-border-l3);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px}
+.clipchat-card__hint{opacity:.6;font-size:12px;line-height:1.5}
+.clipchat-card__notice{padding:10px 12px 12px;opacity:.7;font-size:12px}
+.clipchat-card__note{padding:0 16px 10px}
+.clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:12px;cursor:pointer;border-radius:999px;padding:4px 10px;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.clipchat-actions__btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
+.clipchat-actions__btn[aria-pressed='true']{color:var(--dsw-alias-brand-primary,#2f6fed);border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 45%, var(--dsw-alias-border-l3));background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 10%, transparent)}
+.clipchat-actions__btn:disabled{opacity:.5;cursor:default}
+.clipchat-card__records{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding:10px 16px 14px;margin:0}
+.clipchat-card__record{flex:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.04))}
 .clipchat-card__record-head{display:flex;align-items:center;gap:6px}
 .clipchat-card__record-selection{flex:1;min-width:0;opacity:.7;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clipchat-card__tag{font-size:10px;border-radius:999px;padding:1px 6px;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 18%, transparent);white-space:nowrap}
@@ -129,8 +207,26 @@ window.__ModuleLoader__.load({
 .clipchat-card__record-del{align-self:flex-end;border:none;background:transparent;color:inherit;opacity:.7;font:var(--dsw-font-xs-13);cursor:pointer;padding:0 2px}
 .clipchat-card__record-del:hover{opacity:1}
 .clipchat-card__records-empty{opacity:.6;font-size:11px}
+.clipchat-records__tabs{flex:none;display:flex;gap:6px;align-items:center}
+.clipchat-records__tab{border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:12px;cursor:pointer;border-radius:999px;padding:4px 10px;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.clipchat-records__tab:hover{color:var(--dsw-alias-label-primary)}
+.clipchat-records__tab.on{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1));border-color:var(--dsw-alias-border-l3)}
+.clipchat-search{flex:none;display:flex;flex-direction:column;gap:8px;min-height:0}
+.clipchat-search__input{width:100%;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l3);border-radius:9px;background:transparent;color:inherit;font:inherit;font-size:13px;padding:7px 10px}
+.clipchat-search__input:focus{outline:none;border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 50%, var(--dsw-alias-border-l3));box-shadow:0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 12%, transparent)}
+.clipchat-search__row{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px dashed var(--dsw-alias-border-l3)}
+.clipchat-search__row:last-child{border-bottom:0}
+.clipchat-search__selection{font-size:11.5px;opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-search__q{font-size:12.5px;font-weight:600;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-search__a{font-size:12.5px;line-height:1.6;white-space:pre-wrap;opacity:.8;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.clipchat-search__a.is-open{display:block;-webkit-line-clamp:unset;line-clamp:unset;max-height:200px;overflow:auto;opacity:.92}
+.clipchat-search__meta{font-size:11px;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-search__actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.clipchat-search__actions button{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;transition:background .12s ease,color .12s ease}
+.clipchat-search__actions button:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
 .clipchat-layer{position:absolute;inset:0;pointer-events:none;z-index:5}
-.clipchat-layer__rect{position:absolute;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 22%, transparent);border-radius:2px;pointer-events:auto;cursor:pointer}
+.clipchat-layer__line{position:absolute;box-sizing:border-box;background:transparent;border-bottom:2px solid var(--dsw-alias-state-success-primary,#1f9d63);border-radius:0 0 2px 2px;pointer-events:auto;cursor:pointer;transition:background .12s ease,border-bottom-color .12s ease}
+.clipchat-layer__line:hover{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 9%, transparent)}
 `
     let styleTag
 
@@ -141,6 +237,8 @@ window.__ModuleLoader__.load({
       styleTag.textContent = css
       document.head.appendChild(styleTag)
     }
+
+    /* Pure helpers. */
 
     /** Stable chat node key of the live selection's source, when available. */
     function nodeKeyOfSelection() {
@@ -729,7 +827,7 @@ window.__ModuleLoader__.load({
             for (const rect of range.getClientRects()) {
               if (rect.width <= 0 || rect.height <= 0) continue
               const mark = document.createElement('div')
-              mark.className = 'clipchat-layer__rect'
+              mark.className = 'clipchat-layer__line'
               mark.setAttribute('data-clipchat-id', id)
               mark.style.left = `${(rect.left - columnRect.left) / scaleX - column.clientLeft + column.scrollLeft}px`
               mark.style.top = `${(rect.top - columnRect.top) / scaleY - column.clientTop + column.scrollTop}px`
@@ -917,12 +1015,200 @@ window.__ModuleLoader__.load({
       return `${prefix}回答：${a.slice(0, room)}…`
     }
 
+    /** Build one visible thread turn from its parts. */
+    function turnOf(question, answer, options = {}) {
+      return {
+        question,
+        answer: typeof answer === 'string' ? answer : '',
+        streaming: options.streaming === true,
+        error: typeof options.error === 'string' ? options.error : '',
+      }
+    }
+
+    /** Quick asks are inert while streaming or when no passage was read. */
+    function presetDisabled(streaming, selection) {
+      return streaming === true || typeof selection !== 'string' || selection.trim().length === 0
+    }
+
+    /** Fetch and decode one JSON response; non-OK statuses throw. */
+    async function fetchJson(url, signal) {
+      const response = await fetch(url, signal === undefined ? undefined : { signal })
+      if (response.ok !== true) throw new Error(`status ${response.status}`)
+      return response.json()
+    }
+
+    /** Commit the passage highlight on the first ask; null when it is not needed. */
+    function askHighlightId({ highlighted, anchor, model, add }) {
+      if (highlighted === true) return null
+      if (anchor === null || anchor === undefined) return null
+      return add(anchor, model ?? null)
+    }
+
+    /* Card thread and preset helpers. */
+
+    /** The fixed one-click questions shown above the card's composer. */
+    const PRESETS = [
+      { id: 'explain', label: 'presetExplain', question: 'presetExplainQ' },
+      { id: 'translate', label: 'presetTranslate', question: 'presetTranslateQ' },
+      { id: 'critique', label: 'presetCritique', question: 'presetCritiqueQ' },
+      { id: 'example', label: 'presetExample', question: 'presetExampleQ' },
+    ]
+
+    /**
+     * Localized preset entries for one card.
+     * @param {(key: string) => string} translate - locale binder.
+     * @returns {Array<{ id: string, label: string, question: string }>} presets.
+     */
+    function presetList(translate) {
+      return PRESETS.map((preset) => ({
+        id: preset.id,
+        label: translate(preset.label),
+        question: translate(preset.question),
+      }))
+    }
+
+    /**
+     * Flatten one answer into plain, bold and code parts. Only `**bold**` and
+     * `` `code` `` are recognized; every other character stays literal text.
+     * @param {string} text - answer text.
+     * @returns {Array<{ text: string, strong?: boolean, code?: boolean }>} parts.
+     */
+    function inlineParts(text) {
+      if (typeof text !== 'string' || text.length === 0) return []
+      const parts = []
+      const pattern = /\*\*([\s\S]+?)\*\*|`([^`\n]+)`/gu
+      let last = 0
+      for (const match of text.matchAll(pattern)) {
+        if (match.index > last) parts.push({ text: text.slice(last, match.index) })
+        if (match[1] !== undefined) parts.push({ text: match[1], strong: true })
+        else parts.push({ text: match[2], code: true })
+        last = match.index + match[0].length
+      }
+      if (last < text.length) parts.push({ text: text.slice(last) })
+      return parts
+    }
+
+    /**
+     * Visible Q&A turns: the recalled record first, then completed pairs, then
+     * the in-flight or failed question.
+     * @param {Array<{ role: string, text: string }>} history - completed pairs.
+     * @param {{ question: string, answer: string, streaming?: boolean, error?: string } | null} current - in-flight turn.
+     * @param {{ question: string, answer: string } | null} [loadedRecord] - record opened from a highlight.
+     * @returns {Array<object>} turns in display order.
+     */
+    function threadTurns(history, current, loadedRecord = null) {
+      const turns = []
+      if (loadedRecord !== null && loadedRecord !== undefined) {
+        turns.push(turnOf(loadedRecord.question, loadedRecord.answer))
+      }
+      const entries = Array.isArray(history) ? history : []
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index]
+        if (entry === null || entry === undefined || entry.role !== 'user') continue
+        const next = entries[index + 1]
+        const hasAnswer = next !== undefined && next !== null && next.role === 'assistant'
+        turns.push(turnOf(entry.text, hasAnswer ? next.text : ''))
+        if (hasAnswer) index += 1
+      }
+      if (current !== null && current !== undefined && typeof current.question === 'string' && current.question.length > 0) {
+        turns.push(turnOf(current.question, current.answer, {
+          streaming: current.streaming,
+          error: current.error,
+        }))
+      }
+      return turns
+    }
+
+    /* Cross-session search: pure helpers and the card hook. */
+
+    /** Stable key for one cross-session search row. */
+    function searchKeyOf(item) {
+      return `${item.sessionId}:${item.recordId}`
+    }
+
+    /** Local date for a result row; `—` when the timestamp is unusable. */
+    function dateTextOf(value) {
+      if (!Number.isFinite(value) || value <= 0) return '—'
+      try {
+        return new Date(value).toLocaleDateString()
+      } catch {
+        return '—'
+      }
+    }
+
+    /**
+     * Cross-session search state for one card: debounced query, results and the
+     * expand/copy affordances. Fetches only while the "all sessions" tab is open.
+     * @param {boolean} active - whether the all-sessions view is visible.
+     * @returns {object} search state and actions.
+     */
+    function useCrossSessionSearch(active) {
+      const [query, setQuery] = React.useState('')
+      const [results, setResults] = React.useState([])
+      const [total, setTotal] = React.useState(0)
+      const [truncated, setTruncated] = React.useState(false)
+      const [state, setState] = React.useState('idle')
+      const [expandedKey, setExpandedKey] = React.useState(null)
+      const [copiedKey, setCopiedKey] = React.useState(null)
+
+      React.useEffect(() => {
+        if (!active || typeof fetch !== 'function') return undefined
+        let alive = true
+        const controller = typeof AbortController === 'function' ? new AbortController() : null
+        setState('loading')
+        const timer = setTimeout(() => {
+          fetchJson(
+            `${SEARCH_PATH}?q=${encodeURIComponent(query.trim())}&limit=${SEARCH_LIMIT}`,
+            controller === null ? undefined : controller.signal,
+          )
+            .then((payload) => {
+              if (!alive) return
+              setResults(Array.isArray(payload?.items) ? payload.items : [])
+              setTotal(Number.isFinite(payload?.total) ? payload.total : 0)
+              setTruncated(payload?.truncated === true)
+              setState('idle')
+            })
+            .catch((error) => {
+              if (!alive || error?.name === 'AbortError') return
+              setState('error')
+            })
+        }, 200)
+        return () => {
+          alive = false
+          clearTimeout(timer)
+          controller?.abort()
+        }
+      }, [active, query])
+
+      React.useEffect(() => {
+        if (copiedKey === null) return undefined
+        const timer = setTimeout(() => setCopiedKey(null), 1500)
+        return () => clearTimeout(timer)
+      }, [copiedKey])
+
+      /** Copy one result's Q&A; clipboard access is best-effort. */
+      const copy = async (item) => {
+        try {
+          if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') return
+          await navigator.clipboard.writeText(`${item.question}\n\n${item.answer}`)
+          setCopiedKey(searchKeyOf(item))
+        } catch {
+          /* A denied clipboard must not break the card. */
+        }
+      }
+
+      return { query, setQuery, results, total, truncated, state, expandedKey, setExpandedKey, copiedKey, copy }
+    }
+
+    /* Components. */
+
     /** Shown when the host has no writable quote surface (read-only / subagent). */
     function ClipNotice(props) {
       const { dismiss, t } = props
       return h('div', { className: 'clipchat-card' },
-        h('div', { className: 'clipchat-card__head' },
-          h('span', null, t('title')),
+        h('div', { className: 'clipchat-card__bar' },
+          h('span', { className: 'clipchat-card__mark' }, '✦'),
+          h('span', { className: 'clipchat-card__bar-text' }, t('title')),
           h('button', {
             type: 'button',
             className: 'clipchat-card__close',
@@ -930,7 +1216,7 @@ window.__ModuleLoader__.load({
             title: t('close'),
             onClick: () => dismiss(),
           }, '×')),
-        h('div', { className: 'clipchat-card__hint' }, t('unavailable')),
+        h('div', { className: 'clipchat-card__notice' }, t('unavailable')),
       )
     }
 
@@ -968,6 +1254,7 @@ window.__ModuleLoader__.load({
     function ClipCard(props) {
       const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat, inputActions, initialHighlightId } = props
       const textareaRef = React.useRef(null)
+      const threadRef = React.useRef(null)
       const controllerRef = React.useRef(null)
       const requestIdRef = React.useRef(0)
       const aliveRef = React.useRef(true)
@@ -975,16 +1262,22 @@ window.__ModuleLoader__.load({
         ? null
         : recordForHighlight(initialHighlightId, selection))
       const [draft, setDraft] = React.useState(() => loadedRecord?.question ?? '')
-      const [answer, setAnswer] = React.useState(() => loadedRecord?.answer ?? '')
+      const [answer, setAnswer] = React.useState('')
       const [tokens, setTokens] = React.useState(null)
       const [error, setError] = React.useState('')
       const [streaming, setStreaming] = React.useState(false)
+      const [asked, setAsked] = React.useState(null)
       const [history, setHistory] = React.useState([])
       const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection))
       const [model, setModel] = React.useState(() => storedModelOf(nodeKey, selection))
       const [modelList, setModelList] = React.useState([])
+      const [modelMenuOpen, setModelMenuOpen] = React.useState(false)
+      const [recordsView, setRecordsView] = React.useState('session')
+      const search = useCrossSessionSearch(recordsView === 'all')
       const [meta, setMeta] = React.useState(null)
-      const [answered, setAnswered] = React.useState(null)
+      const [answered, setAnswered] = React.useState(() => loadedRecord === null
+        ? null
+        : { question: loadedRecord.question, answer: loadedRecord.answer })
       const [recordsOpen, setRecordsOpen] = React.useState(false)
       const [insertState, setInsertState] = React.useState('idle')
       const [, bumpRecords] = React.useState(0)
@@ -1007,10 +1300,8 @@ window.__ModuleLoader__.load({
         if (typeof fetch !== 'function') return () => { alive = false }
         const session = writeSessionId(sessionId)
         const query = session === null ? '' : `?sessionId=${encodeURIComponent(session)}`
-        fetch(`${MODELS_PATH}${query}`)
-          .then(async (response) => {
-            if (response.ok !== true) throw new Error(`status ${response.status}`)
-            const payload = await response.json()
+        fetchJson(`${MODELS_PATH}${query}`)
+          .then((payload) => {
             if (!alive || !Array.isArray(payload?.models)) return
             setModelList(payload.models)
           })
@@ -1025,6 +1316,34 @@ window.__ModuleLoader__.load({
         controllerRef.current?.abort()
         controllerRef.current = null
       }, [])
+
+      // Keep the newest turn in view while the answer grows.
+      React.useEffect(() => {
+        const thread = threadRef.current
+        if (thread !== null && thread !== undefined) thread.scrollTop = thread.scrollHeight
+      }, [answer, streaming, history])
+
+      // Close the model menu on outside click; Esc closes the menu, not the card.
+      React.useEffect(() => {
+        if (!modelMenuOpen || typeof document === 'undefined') return undefined
+        const closeOnOutside = (event) => {
+          const target = event.target
+          if (target !== null && target !== undefined && typeof target.closest === 'function'
+            && target.closest('.clipchat-card__modelwrap') !== null) return
+          setModelMenuOpen(false)
+        }
+        const closeOnEscape = (event) => {
+          if (event.key !== 'Escape') return
+          event.stopPropagation()
+          setModelMenuOpen(false)
+        }
+        document.addEventListener('pointerdown', closeOnOutside, true)
+        document.addEventListener('keydown', closeOnEscape, true)
+        return () => {
+          document.removeEventListener('pointerdown', closeOnOutside, true)
+          document.removeEventListener('keydown', closeOnEscape, true)
+        }
+      }, [modelMenuOpen])
 
       /**
        * Ask one question and render the streamed answer.
@@ -1094,8 +1413,10 @@ window.__ModuleLoader__.load({
           }
 
           if (current()) setStreaming(false)
+          if (current() && !failed && text.length === 0) setError(translate('failed'))
           if (current() && !failed && text.length > 0) {
             setDraft('')
+            setAsked(null)
             setAnswered({ question: request.question, answer: text })
             setHistory((previous) => [
               ...previous,
@@ -1121,8 +1442,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const send = () => {
-        const question = draft.trim()
+      const submit = (question) => {
         if (streaming || question.length === 0) return
 
         const chat = { nodes, timeline, locations }
@@ -1135,11 +1455,16 @@ window.__ModuleLoader__.load({
         const recent = recentTurnsOf(chat, nodeKey, RECENT_LIMIT)
         const turn = nodeTurn(node)
 
+        // Asking is the commit signal: the passage is highlighted on first ask.
+        const highlightId = askHighlightId({ highlighted, anchor, model, add: addHighlight })
+        if (highlightId !== null) setHighlighted(true)
+
         controllerRef.current?.abort()
         const controller = new AbortController()
         controllerRef.current = controller
         const requestId = ++requestIdRef.current
 
+        setAsked(question)
         setStreaming(true)
         setAnswer('')
         setError('')
@@ -1159,6 +1484,8 @@ window.__ModuleLoader__.load({
         if (model !== null) request.model = model
         void ask(request, requestId, controller.signal)
       }
+
+      const send = () => submit(draft.trim())
 
       /** Select one menu entry and persist it on the covering highlight. */
       const chooseModel = (key) => {
@@ -1193,19 +1520,24 @@ window.__ModuleLoader__.load({
         bumpRecords((value) => value + 1)
       }
 
-      /** Insert the selection quote plus a short Q&A summary into the main composer. */
-      const backToMain = () => {
-        if (answered === null) return
-        const summary = summarizeAnswer(answered.question, answered.answer)
+      /**
+       * Insert one passage quote plus its Q&A summary into the main composer.
+       * Shared by the card's own answer and by cross-session search results.
+       * @param {string} passage - quoted text.
+       * @param {string} question - the question to summarise.
+       * @param {string} answer - the answer to summarise.
+       */
+      const insertIntoMain = (passage, question, answer) => {
+        const summary = summarizeAnswer(question, answer)
         if (summary.length === 0) return
         const text = `\n\n〔滑词〕${summary}`
-        const plain = `> ${selection}${text}`
+        const plain = `> ${passage}${text}`
         try {
           let ok = false
           if (typeof inputActions?.insertQuote === 'function'
             && typeof inputActions?.captureInsertion === 'function'
             && typeof inputActions?.insertText === 'function') {
-            const accepted = inputActions.insertQuote(selection)
+            const accepted = inputActions.insertQuote(passage)
             const span = inputActions.captureInsertion()
             ok = inputActions.insertText(accepted ? text : plain, span)
           }
@@ -1213,6 +1545,12 @@ window.__ModuleLoader__.load({
         } catch {
           setInsertState('failed')
         }
+      }
+
+      /** Insert this card's last answer into the main composer. */
+      const backToMain = () => {
+        if (answered === null) return
+        insertIntoMain(selection, answered.question, answered.answer)
       }
 
       /** Delete one record from memory and from the store. */
@@ -1259,16 +1597,82 @@ window.__ModuleLoader__.load({
         ? null
         : `${translate('tokensIn')} ${tokens.input} / ${translate('tokensOut')} ${tokens.output}`
       const modelChoices = modelChoicesOf(modelList, model)
+      const currentModelKey = modelKeyOf(model)
+      const currentChoice = modelChoices.find((choice) => choice.key === currentModelKey)
+      const modelLabel = currentModelKey === FOLLOW_MODEL
+        ? translate('followModel')
+        : currentChoice?.name ?? model?.model ?? currentModelKey
       const recordEntries = recordList()
       const alreadyRecorded = answered !== null && recordEntries.some((entry) => (
         entry.selection === selection
         && entry.question === answered.question
         && entry.answer === answered.answer
       ))
+      const currentTurn = asked === null ? null : turnOf(asked, answer, { streaming, error })
+      const turns = threadTurns(history, currentTurn, loadedRecord)
+      const presetEntries = presetList(translate)
+
+      const answerView = (text) => inlineParts(text).map((part, index) => {
+        if (part.code === true) return h('code', { key: index }, part.text)
+        if (part.strong === true) return h('strong', { key: index }, part.text)
+        return part.text
+      })
+
+      const turnView = (turn, index) => h('div', {
+        key: `${index}:${turn.question.slice(0, 12)}`,
+        className: 'clipchat-card__turn',
+      },
+        h('div', { className: 'clipchat-card__q' }, turn.question),
+        h('div', { className: 'clipchat-card__a' },
+          turn.answer.length > 0
+            ? answerView(turn.answer)
+            : turn.streaming ? translate('thinking') : '',
+          turn.streaming ? h('span', { className: 'clipchat-card__cursor' }, '▍') : null),
+        turn.error.length > 0
+          ? h('div', { className: 'clipchat-card__error', role: 'alert' }, turn.error)
+          : null,
+      )
+
+      /** One cross-session search result. */
+      const searchRow = (item) => {
+        const key = searchKeyOf(item)
+        const expanded = search.expandedKey === key
+        return h('div', {
+          key,
+          className: 'clipchat-search__row',
+          title: item.sessionId,
+        },
+          h('div', { className: 'clipchat-search__selection' }, snippetOf(item.selection, 90)),
+          h('div', { className: 'clipchat-search__q' }, snippetOf(item.question, 140)),
+          h('div', { className: `clipchat-search__a${expanded ? ' is-open' : ''}` },
+            expanded ? item.answer : snippetOf(item.answer, 180)),
+          h('div', { className: 'clipchat-search__meta' },
+            `${item.provider}/${item.model} · ${dateTextOf(item.createdAt)} · ${String(item.sessionId).slice(-6)}`),
+          h('div', { className: 'clipchat-search__actions' },
+            h('button', {
+              type: 'button',
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => void search.copy(item),
+            }, search.copiedKey === key ? translate('copied') : translate('copy')),
+            h('button', {
+              type: 'button',
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => insertIntoMain(item.selection, item.question, item.answer),
+            }, translate('insertToMain')),
+            h('button', {
+              type: 'button',
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => search.setExpandedKey(expanded ? null : key),
+            }, expanded ? translate('collapseAnswer') : translate('expandAnswer'))))
+      }
 
       return h('div', { className: 'clipchat-card' },
-        h('div', { className: 'clipchat-card__head' },
-          h('span', null, translate('title')),
+        h('div', { className: 'clipchat-card__bar' },
+          h('span', { className: 'clipchat-card__mark' }, '✦'),
+          h('span', {
+            className: 'clipchat-card__bar-text',
+            title: selection,
+          }, selection.length > 0 ? selection : translate('empty')),
           h('button', {
             type: 'button',
             className: 'clipchat-card__close',
@@ -1277,48 +1681,83 @@ window.__ModuleLoader__.load({
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => dismiss(),
           }, '×')),
-        h('div', { className: 'clipchat-card__label' }, translate('preview')),
-        h('div', { className: 'clipchat-card__selection' }, selection.length > 0 ? selection : translate('empty')),
-        loadedRecord === null ? null : h('div', { className: 'clipchat-card__label' }, translate('previousQa')),
-        loadedRecord === null ? null : h('div', { className: 'clipchat-card__record-q' }, loadedRecord.question),
-        h('div', { className: 'clipchat-card__answer' },
-          answer.length > 0 ? answer : streaming ? translate('thinking') : ''),
-        tokenLine === null ? null : h('div', { className: 'clipchat-card__tokens' }, tokenLine),
-        error.length > 0 ? h('div', { className: 'clipchat-card__error', role: 'alert' }, error) : null,
+
+        h('div', { className: 'clipchat-card__presets' },
+          presetEntries.map((preset) => h('button', {
+            key: preset.id,
+            type: 'button',
+            className: 'clipchat-card__preset',
+            disabled: presetDisabled(streaming, selection),
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: () => submit(preset.question),
+          }, preset.label))),
+
+        h('div', { ref: threadRef, className: 'clipchat-card__thread' },
+          turns.length === 0
+            ? h('div', { className: 'clipchat-card__empty' },
+              h('span', { className: 'clipchat-card__empty-mark' }, '“'),
+              h('div', { className: 'clipchat-card__empty-text' },
+                h('div', { className: 'clipchat-card__empty-title' }, translate('threadHint')),
+                h('div', { className: 'clipchat-card__empty-sub' }, translate('threadHintSub'))))
+            : turns.map(turnView),
+          asked === null && error.length > 0
+            ? h('div', { className: 'clipchat-card__error', role: 'alert' }, error)
+            : null),
+
         h('div', { className: 'clipchat-card__composer' },
           h('textarea', {
             ref: textareaRef,
             className: 'clipchat-card__ta',
-            rows: 2,
+            rows: 1,
             value: draft,
             placeholder: translate('placeholder'),
+            title: translate('inputHint'),
             onChange: (event) => setDraft(event.target.value),
             onKeyDown,
           }),
           h('button', {
             type: 'button',
             className: 'clipchat-card__send',
+            'aria-label': streaming ? translate('stop') : translate('send'),
+            title: streaming ? translate('stop') : translate('send'),
             disabled: streaming ? false : draft.trim().length === 0,
+            onMouseDown: (event) => event.preventDefault(),
             onClick: streaming ? () => controllerRef.current?.abort() : send,
-          }, streaming ? translate('stop') : translate('send')),
-        ),
+          }, streaming ? '■' : '↑')),
 
-        h('div', { className: 'clipchat-card__modelrow' },
-          h('span', { className: 'clipchat-card__label' }, translate('model')),
-          h('select', {
-            className: 'clipchat-card__model',
-            'aria-label': translate('model'),
-            title: translate('model'),
-            value: modelKeyOf(model),
-            onChange: (event) => chooseModel(event.target.value),
-          }, modelChoices.map((choice) => h('option', {
-            key: choice.key,
-            value: choice.key,
-          }, choice.key === FOLLOW_MODEL ? translate('followModel') : choice.name)))),
-        h('div', { className: 'clipchat-actions' },
+        h('div', { className: 'clipchat-card__footer' },
+          h('div', { className: 'clipchat-card__modelwrap' },
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__modelbtn',
+              'aria-label': `${translate('model')}: ${modelLabel}`,
+              'aria-haspopup': 'menu',
+              'aria-expanded': modelMenuOpen,
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => setModelMenuOpen((open) => !open),
+            }, `${modelLabel} ▾`),
+            modelMenuOpen
+              ? h('div', { className: 'clipchat-card__modelmenu', role: 'menu' },
+                modelChoices.map((choice) => h('button', {
+                  key: choice.key,
+                  type: 'button',
+                  role: 'menuitemradio',
+                  'aria-checked': choice.key === currentModelKey,
+                  className: `clipchat-card__modelitem${choice.key === currentModelKey ? ' on' : ''}`,
+                  onMouseDown: (event) => event.preventDefault(),
+                  onClick: () => {
+                    chooseModel(choice.key)
+                    setModelMenuOpen(false)
+                  },
+                }, choice.key === FOLLOW_MODEL ? translate('followModel') : choice.name)))
+              : null),
+          h('span', { className: 'clipchat-card__tokens' },
+            streaming ? translate('generating') : tokenLine ?? translate('noTokens')),
+          h('span', { className: 'clipchat-card__spacer' }),
           anchor === null || anchor === undefined ? null : h('button', {
             type: 'button',
             className: 'clipchat-actions__btn',
+            'aria-pressed': highlighted,
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => {
               if (highlighted) {
@@ -1355,21 +1794,58 @@ window.__ModuleLoader__.load({
             'aria-expanded': recordsOpen,
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => setRecordsOpen((open) => !open),
-          }, `${translate('records')} ${recordEntries.length}`),
-        ),
+          }, `${translate('records')} ${recordEntries.length}`)),
+
         insertState === 'failed'
-          ? h('div', { className: 'clipchat-card__error', role: 'alert' }, translate('insertFailed'))
+          ? h('div', { className: 'clipchat-card__error clipchat-card__note', role: 'alert' }, translate('insertFailed'))
           : insertState === 'inserted'
-            ? h('div', { className: 'clipchat-card__hint' }, translate('inserted'))
+            ? h('div', { className: 'clipchat-card__hint clipchat-card__note' }, translate('inserted'))
             : null,
         recordsOpen ? h('div', { className: 'clipchat-card__records' },
-          recordEntries.length === 0
-            ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
-            : recordEntries.map(recordRow),
+          h('div', { className: 'clipchat-records__tabs' },
+            h('button', {
+              type: 'button',
+              className: `clipchat-records__tab${recordsView === 'session' ? ' on' : ''}`,
+              'aria-pressed': recordsView === 'session',
+              onClick: () => setRecordsView('session'),
+            }, `${translate('recordsSession')} ${recordEntries.length}`),
+            h('button', {
+              type: 'button',
+              className: `clipchat-records__tab${recordsView === 'all' ? ' on' : ''}`,
+              'aria-pressed': recordsView === 'all',
+              onClick: () => setRecordsView('all'),
+            }, search.state === 'idle' && search.total > 0 ? `${translate('recordsAll')} ${search.total}` : translate('recordsAll'))),
+          recordsView === 'session'
+            ? (recordEntries.length === 0
+              ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
+              : recordEntries.map(recordRow))
+            : h('div', { className: 'clipchat-search' },
+              h('input', {
+                className: 'clipchat-search__input',
+                type: 'search',
+                value: search.query,
+                placeholder: translate('searchPlaceholder'),
+                'aria-label': translate('searchPlaceholder'),
+                onChange: (event) => search.setQuery(event.target.value),
+              }),
+              search.state === 'loading'
+                ? h('div', { className: 'clipchat-card__hint' }, translate('searchLoading'))
+                : null,
+              search.state === 'error'
+                ? h('div', { className: 'clipchat-card__error', role: 'alert' }, translate('searchFailed'))
+                : null,
+              search.state === 'idle' && search.results.length === 0
+                ? h('div', { className: 'clipchat-card__hint' }, translate('searchEmpty'))
+                : null,
+              search.state === 'idle' && search.results.length > 0 && search.truncated
+                ? h('div', { className: 'clipchat-card__hint' }, translate('searchTruncated'))
+                : null,
+              search.results.map(searchRow)),
         ) : null,
       )
     }
 
+    /* Plugin entry. */
     function apply(ctx) {
       ctx.effect(() => {
         ensureStyle()
@@ -1401,7 +1877,7 @@ window.__ModuleLoader__.load({
         void maybeLoadSession()
         const onResize = () => scheduleRender()
         const onHighlightClick = (event) => {
-          const target = event.target instanceof Element ? event.target.closest('.clipchat-layer__rect') : null
+          const target = event.target instanceof Element ? event.target.closest('.clipchat-layer__line') : null
           if (target === null) return
           const entry = highlights.get(target.getAttribute('data-clipchat-id'))
           if (entry === undefined) return
@@ -1472,7 +1948,16 @@ window.__ModuleLoader__.load({
         anchorFromSelection,
         resolvedSpanAt,
         summarizeAnswer,
+        presetList,
+        inlineParts,
+        threadTurns,
+        turnOf,
+        presetDisabled,
+        askHighlightId,
+        searchKeyOf,
+        dateTextOf,
         ClipNotice,
+        ClipCard,
         currentSessionIdOf,
         highlightIdOf,
         hasHighlight,

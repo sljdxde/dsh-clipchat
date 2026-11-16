@@ -4,9 +4,9 @@ DSH Web plugin for selecting a passage in an assistant reply, asking about it in
 
 ## Layout
 
-- `index.js` — host half: webServer routes (`status`, `ask`, `models`, `session`, `highlight`, `record`), guard, model resolution, store wiring.
+- `index.js` — host half: webServer routes (`status`, `ask`, `models`, `session`, `search`, `highlight`, `record`), guard, model resolution, store wiring.
 - `client.js` — browser half: wraps the native quote `text-interaction` slot, menu/card UI, SSE streaming, highlight overlay, records. Single hand-written bundle, no build step.
-- `lib/` — host-side modules: `context`, `http`, `model`, `models`, `store`.
+- `lib/` — host-side modules: `context`, `http`, `model`, `models`, `search`, `store`.
 - `test/` — `node:test` suites; shared harnesses in `test/helpers/`.
 - `docs/ACCEPTANCE.md` — manual acceptance checklist. `docs/decisions/` — ADRs.
 - `CODING_STANDARDS.md` — reviewer-facing judgement rules.

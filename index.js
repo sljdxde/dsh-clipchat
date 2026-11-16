@@ -1,11 +1,12 @@
 /**
  * dsh-clipchat host half.
  *
- * Six routes, all behind the host's own request fence:
+ * Seven routes, all behind the host's own request fence:
  *   GET  /dsh-clipchat/status    → { ok, guard, model } for development self-checks
  *   GET  /dsh-clipchat/models    → { models, current } for the per-highlight picker
  *   POST /dsh-clipchat/ask       → SSE answer for one in-card question
  *   GET  /dsh-clipchat/session   → { highlights, records } of one conversation
+ *   GET  /dsh-clipchat/search    → { items, total, truncated } across every session
  *   POST /dsh-clipchat/highlight → { highlights } after an add or remove
  *   POST /dsh-clipchat/record    → { records } after an add or remove
  *
@@ -28,6 +29,7 @@ import {
 import { normalizeModelRoute, resolveModel } from './lib/model.js'
 import { isModelAvailable, listModelChoices } from './lib/models.js'
 import { createStore, isValidHighlight, isValidRecord, isValidSessionId } from './lib/store.js'
+import { SEARCH_LIMITS, searchLimitOf, searchRecords } from './lib/search.js'
 
 const PREFIX = '/dsh-clipchat'
 const STATUS_PATH = `${PREFIX}/status`
@@ -36,6 +38,7 @@ const SESSION_PATH = `${PREFIX}/session`
 const HIGHLIGHT_PATH = `${PREFIX}/highlight`
 const RECORD_PATH = `${PREFIX}/record`
 const MODELS_PATH = `${PREFIX}/models`
+const SEARCH_PATH = `${PREFIX}/search`
 const ANSWER_MAX_TOKENS = 2048
 
 /**
@@ -380,43 +383,73 @@ export function apply(ctx, options = {}) {
     }
   }
 
-  /** `GET /dsh-clipchat/models`: picker catalog plus the session's current route. */
-  const handleModels = async (req, res) => {
+  /**
+   * Wrap one read-only route with the guard, method check and error mapping.
+   * @param {string} errorCode - stable code for an unexpected failure.
+   * @param {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>} handle - route body.
+   * @returns {Function} the request handler.
+   */
+  const readRoute = (errorCode, handle) => async (req, res) => {
     if (guard(req, res)) return
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendJson(res, 405, { error: 'method-not-allowed' })
       return
     }
+    try {
+      await handle(req, res)
+    } catch (error) {
+      sendJson(res, 500, { error: errorCode, message: String(error?.message ?? error) })
+    }
+  }
+
+  /** `GET /dsh-clipchat/models`: picker catalog plus the session's current route. */
+  const handleModels = readRoute('models-unavailable', async (req, res) => {
     const sessionId = sessionIdOf(req)
     if (sessionId !== null && sessionId.length > 0 && !isValidSessionId(sessionId)) {
       sendJson(res, 400, { error: 'invalid-session-id' })
       return
     }
-    try {
-      const { models, current } = await listModelChoices(ctx, {
-        sessionId: sessionId ?? undefined,
-      })
-      sendJson(res, 200, {
-        models: models.map((entry) => ({
-          ...entry,
-          isDefault: current !== null
-            && entry.provider === current.provider
-            && entry.model === current.model,
-        })),
-        current,
-      })
-    } catch (error) {
-      sendJson(res, 500, { error: 'models-unavailable', message: String(error?.message ?? error) })
-    }
-  }
+    const { models, current } = await listModelChoices(ctx, {
+      sessionId: sessionId ?? undefined,
+    })
+    sendJson(res, 200, {
+      models: models.map((entry) => ({
+        ...entry,
+        isDefault: current !== null
+          && entry.provider === current.provider
+          && entry.model === current.model,
+      })),
+      current,
+    })
+  })
 
-  /** `GET /dsh-clipchat/session`: persisted highlights and records of one conversation. */
-  const handleSession = async (req, res) => {
-    if (guard(req, res)) return
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      sendJson(res, 405, { error: 'method-not-allowed' })
+  /** `GET /dsh-clipchat/search`: substring search across every session's 留痕. */
+  const handleSearch = readRoute('search-unavailable', async (req, res) => {
+    let url
+    try {
+      url = new URL(typeof req.url === 'string' ? req.url : '/', 'http://localhost')
+    } catch {
+      sendJson(res, 400, { error: 'invalid-request' })
       return
     }
+    const query = url.searchParams.get('q') ?? ''
+    if (query.length > SEARCH_LIMITS.maxQueryChars) {
+      sendJson(res, 400, { error: 'query-too-long' })
+      return
+    }
+    const limit = searchLimitOf(url.searchParams.get('limit'))
+    const corpus = await store.readAllForSearch()
+    const found = searchRecords(corpus.sessions, query, limit)
+    sendJson(res, 200, {
+      query,
+      total: found.total,
+      truncated: corpus.truncated || found.truncated,
+      items: found.items,
+    })
+  })
+
+  /** `GET /dsh-clipchat/session`: persisted highlights and records of one conversation. */
+  const handleSession = readRoute('store-unavailable', async (req, res) => {
     const sessionId = sessionIdOf(req)
     if (sessionId === null || sessionId.length === 0) {
       sendJson(res, 400, { error: 'missing-session-id' })
@@ -426,14 +459,10 @@ export function apply(ctx, options = {}) {
       sendJson(res, 400, { error: 'invalid-session-id' })
       return
     }
-    try {
-      await sweepStore()
-      const state = await store.load(sessionId)
-      sendJson(res, 200, { highlights: state.highlights, records: state.records })
-    } catch (error) {
-      sendJson(res, 500, { error: 'store-unavailable', message: String(error?.message ?? error) })
-    }
-  }
+    await sweepStore()
+    const state = await store.load(sessionId)
+    sendJson(res, 200, { highlights: state.highlights, records: state.records })
+  })
 
   /**
    * Build one add/remove entity route over the session store.
@@ -525,6 +554,10 @@ export function apply(ctx, options = {}) {
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: SESSION_PATH, handler: handleSession }),
       'dsh-clipchat: session route',
+    )
+    scope.effect(
+      () => scope.webServer.register({ kind: 'exact', path: SEARCH_PATH, handler: handleSearch }),
+      'dsh-clipchat: search route',
     )
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: HIGHLIGHT_PATH, handler: handleHighlight }),

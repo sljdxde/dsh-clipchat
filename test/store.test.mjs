@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createStore, defaultStoreRoot, isValidSessionId, MAX_HIGHLIGHTS } from '../lib/store.js'
+import { makeRecord } from './helpers/records.mjs'
 
 async function makeRoot() {
   return mkdtemp(join(tmpdir(), 'clipchat-store-'))
@@ -393,4 +394,42 @@ test('touch refreshes an existing file and never creates one', async () => {
 
   assert.equal(await later.touch('missing-session'), false)
   assert.deepEqual(await readdir(root), ['session-a.json'])
+})
+
+test('search reads records without refreshing TTL and skips expired or corrupt files', async () => {
+  const root = await makeRoot()
+  const now = 1_000_000_000
+  const store = createStore({ root, now: () => now })
+  await store.addRecord('session-new', makeRecord('r1', { question: 'needle one', createdAt: 100 }))
+  await store.addRecord('session-two', makeRecord('r2', { question: 'other', createdAt: 100 }))
+  await writeFile(join(root, 'session-expired.json'), JSON.stringify({
+    version: 1,
+    sessionId: 'session-expired',
+    updatedAt: now - 8 * 24 * 60 * 60 * 1000,
+    highlights: [],
+    records: [makeRecord('r3', { question: 'needle old', createdAt: 100 })],
+  }))
+  await writeFile(join(root, 'session-bad.json'), '{oops')
+
+  const corpus = await store.readAllForSearch()
+
+  assert.deepEqual(corpus.sessions.map((entry) => entry.sessionId).sort(), ['session-new', 'session-two'])
+  assert.equal(corpus.truncated, false)
+  const before = JSON.parse(await readFile(join(root, 'session-new.json'), 'utf8')).updatedAt
+  await store.readAllForSearch()
+  const after = JSON.parse(await readFile(join(root, 'session-new.json'), 'utf8')).updatedAt
+  assert.equal(before, after, 'search must not refresh updatedAt')
+})
+
+test('search reports truncation when the file cap is reached', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  await store.addRecord('session-a', makeRecord('r1'))
+  await store.addRecord('session-b', makeRecord('r2'))
+
+  const corpus = await store.readAllForSearch({ maxFiles: 1 })
+
+  assert.equal(corpus.sessions.length, 1)
+  assert.equal(corpus.truncated, true)
+  assert.equal(corpus.scanned, 1)
 })

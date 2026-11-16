@@ -4,6 +4,7 @@ import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { makeRecord as record } from './helpers/records.mjs'
 import { createStore, isValidRecord, MAX_FILE_BYTES, MAX_RECORDS } from '../lib/store.js'
 
 async function makeRoot() {
@@ -11,20 +12,6 @@ async function makeRoot() {
 }
 
 /** A well-formed record as the client builds it. */
-function record(id, overrides = {}) {
-  return {
-    id,
-    selection: `passage-${id}`,
-    question: `question-${id}`,
-    answer: `answer-${id}`,
-    provider: 'deepseek',
-    model: 'deepseek-chat',
-    usage: { input: 10, output: 20 },
-    createdAt: 1000,
-    ...overrides,
-  }
-}
-
 async function readState(root, sessionId) {
   return JSON.parse(await readFile(join(root, `${sessionId}.json`), 'utf8'))
 }

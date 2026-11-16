@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { apply } from '../index.js'
 import { call, makeRequest } from './helpers/http.mjs'
 import { createStore } from '../lib/store.js'
+import { makeRecord } from './helpers/records.mjs'
 
 const SESSION_PATH = '/dsh-clipchat/session'
 const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
@@ -522,20 +523,6 @@ test('cleanup is skipped when listSessions resolves an empty corpus', async () =
 
 const RECORD_PATH = '/dsh-clipchat/record'
 
-/** A well-formed record as the client builds it. */
-function makeRecord(id = 'r1') {
-  return {
-    id,
-    selection: `passage-${id}`,
-    question: `question-${id}`,
-    answer: `answer-${id}`,
-    provider: 'deepseek',
-    model: 'deepseek-chat',
-    usage: { input: 10, output: 20 },
-    createdAt: 111,
-  }
-}
-
 const addRecordBody = {
   sessionId: 'session-a',
   op: 'add',
@@ -695,4 +682,79 @@ test('record state of two sessions stays isolated', async () => {
 
   const first = await call(routes.get(SESSION_PATH), getSession('session-a'))
   assert.deepEqual(payloadOf(first).records.map((entry) => entry.id), ['r1'])
+})
+
+// --- cross-session search (M2) ---
+
+const SEARCH_PATH = '/dsh-clipchat/search'
+
+test('registers the search route next to session, highlight and record', async () => {
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+  })
+  apply(ctx, { storeRoot: '/tmp/unused-clipchat-root' })
+
+  assert.equal(typeof routes.get(SEARCH_PATH), 'function')
+})
+
+test('GET search matches across sessions and reports the total', async () => {
+  const { routes, store } = await setup()
+  await store.addRecord('session-a', { ...makeRecord('r1'), question: 'needle in a', answer: 'no' })
+  await store.addRecord('session-b', { ...makeRecord('r2'), question: 'other', answer: 'contains needle' })
+  await store.addRecord('session-b', { ...makeRecord('r3'), question: 'nothing', answer: 'none' })
+
+  const res = await call(routes.get(SEARCH_PATH), makeRequest({
+    method: 'GET',
+    url: `${SEARCH_PATH}?q=NEEDLE`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200)
+  const body = payloadOf(res)
+  assert.equal(body.total, 2)
+  assert.deepEqual(body.items.map((item) => item.recordId), ['r1', 'r2'])
+  assert.equal(body.truncated, false)
+  assert.equal(body.items[1].sessionId, 'session-b')
+})
+
+test('GET search trims to the limit and reports truncation', async () => {
+  const { routes, store } = await setup()
+  await store.addRecord('session-a', makeRecord('r1'))
+  await store.addRecord('session-a', makeRecord('r2'))
+
+  const res = await call(routes.get(SEARCH_PATH), makeRequest({
+    method: 'GET',
+    url: `${SEARCH_PATH}?q=&limit=1`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200)
+  const body = payloadOf(res)
+  assert.equal(body.items.length, 1)
+  assert.equal(body.total, 2)
+  assert.equal(body.truncated, true)
+})
+
+test('GET search rejects an oversized query', async () => {
+  const { routes } = await setup()
+
+  const res = await call(routes.get(SEARCH_PATH), makeRequest({
+    method: 'GET',
+    url: `${SEARCH_PATH}?q=${'x'.repeat(201)}`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.equal(payloadOf(res).error, 'query-too-long')
+})
+
+test('the search route honours the connection guard', async () => {
+  for (const rejection of [401, 403]) {
+    const { routes, disposers } = await setup({ connection: { requestRejection: () => rejection } })
+    const res = await call(routes.get(SEARCH_PATH), makeRequest({
+      method: 'GET', url: SEARCH_PATH, headers: { host: 'h' },
+    }))
+    assert.equal(res.status, rejection)
+    for (const dispose of disposers.reverse()) dispose()
+  }
 })

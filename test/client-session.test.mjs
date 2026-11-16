@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { makeRecord } from './helpers/records.mjs'
 
 const react = {
   createElement: (...args) => ({ args }),
@@ -154,20 +155,6 @@ test('a session switch clears highlights before the new state arrives', async ()
 })
 
 // --- records (ticket 19) ---
-
-function makeRecord(id = 'r1', overrides = {}) {
-  return {
-    id,
-    selection: `passage-${id}`,
-    question: `question-${id}`,
-    answer: `answer-${id}`,
-    provider: 'deepseek',
-    model: 'deepseek-chat',
-    usage: { input: 10, output: 20 },
-    createdAt: 111,
-    ...overrides,
-  }
-}
 
 test('buildRecord assembles the persisted record shape', async () => {
   const test_ = await loadPlugin(makeDocument())
