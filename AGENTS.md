@@ -13,7 +13,7 @@ DSH Web plugin for selecting a passage in an assistant reply, asking about it in
 
 ## Commands
 
-- Check (syntax + tests): `npm run check` — also runs in the `.githooks/pre-commit` hook.
+- Check (syntax + tests): `npm run check` — also runs in the `.githooks/pre-commit` hook (enable once per clone: `git config core.hooksPath .githooks`).
 - Install locally (dev): `scripts/dev-link.sh` creates `/tmp/dsh-clipchat-dev` because the workspace path ends with a space, which installers trim.
 - After changing host code, disable/enable the bundle to reload it; client changes reload on page refresh.
 
