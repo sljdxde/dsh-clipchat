@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 安装后 Plugins 能看到 `dsh-clipchat`，中英文标题/描述与图标正常
-- [ ] 选中 assistant 正文 → 「引用文本」「问这段」并排出现；选中 user 消息只出现原生引用
-- [ ] 点「问这段」→ 卡片展开、输入框聚焦、选段预览正确；空白点击 / Esc / × 关闭后再次选中仍可用
-- [ ] 原生「引用文本」仍能把选段插入输入框
-- [ ] 禁用或卸载后原生引用恢复；重复 apply 不会重复包装（client 测试）
+- [x] 安装后 Plugins 能看到 `dsh-clipchat`，中英文标题/描述与图标正常
+- [x] 选中 assistant 正文 → 「引用文本」「问这段」并排出现；选中 user 消息只出现原生引用
+- [x] 点「问这段」→ 卡片展开、输入框聚焦、选段预览正确；空白点击 / Esc / × 关闭后再次选中仍可用
+- [x] 原生「引用文本」仍能把选段插入输入框
+- [x] 禁用或卸载后原生引用恢复；重复 apply 不会重复包装（client 测试）
