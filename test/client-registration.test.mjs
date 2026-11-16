@@ -109,3 +109,15 @@ test('re-anchors a span when block text shifted, else gives up', async () => {
   assert.deepEqual(plugin.__test.resolvedSpanAt('前缀--0123abcdef', span, 'abcdef'), { blockIndex: 2, start: 8, end: 14 })
   assert.equal(plugin.__test.resolvedSpanAt('完全不同的文字', span, 'abcdef'), null)
 })
+
+test('summarizes a Q&A for the main composer within 200 chars', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const s = plugin.__test.summarizeAnswer('这段在讲什么', '讲的是 X。')
+  assert.equal(s, '问题：这段在讲什么\n回答：讲的是 X。')
+  assert.equal(plugin.__test.summarizeAnswer('q', ''), '')
+  assert.equal(plugin.__test.summarizeAnswer('q', 'a'), '问题：q\n回答：a')
+  const long = plugin.__test.summarizeAnswer('问题'.repeat(50), '答'.repeat(500))
+  assert.ok(long.length <= 200, `length ${long.length}`)
+  assert.ok(long.endsWith('…'))
+})
