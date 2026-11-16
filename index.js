@@ -81,6 +81,74 @@ function sessionIdOf(req) {
 }
 
 /**
+ * Add one usable session id to a keep set; blank and non-string ids are ignored.
+ * @param {Set<string>} ids - destination set.
+ * @param {unknown} value - candidate id.
+ * @returns {void}
+ */
+function addSessionId(ids, value) {
+  if (typeof value === 'string' && value.length > 0) ids.add(value)
+}
+
+/**
+ * Session ids the host currently treats as existing: live sessions, archived
+ * conversations and the complete persisted corpus. `sessions.list()` alone is
+ * live-only, so the persisted listing is required — without it every closed
+ * conversation would look like an orphan.
+ * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
+ * @returns {Promise<Set<string> | null>} the keep set, or null when it cannot be
+ *   established (the caller must then skip the sweep entirely).
+ */
+async function liveSessionIdsOf(ctx) {
+  const sessions = ctx.get('sessions')
+  if (typeof sessions?.list !== 'function') return null
+  let listed
+  try {
+    listed = sessions.list()
+  } catch {
+    return null
+  }
+  if (!Array.isArray(listed)) return null
+  const ids = new Set()
+  for (const entry of listed) {
+    addSessionId(ids, typeof entry === 'string' ? entry : entry?.id)
+  }
+
+  // An archived conversation keeps its data even though it is usually not live.
+  try {
+    const registry = ctx.get('workspaceRegistry') ?? ctx.get('workspace')
+    const archived = registry?.archivedSessionIds
+    if (Array.isArray(archived)) {
+      for (const id of archived) addSessionId(ids, id)
+    }
+  } catch {
+    /* An unavailable registry only narrows the keep set, never widens it. */
+  }
+
+  // The complete corpus: live-preferred records for every persisted session.
+  const query = ctx.get('sessionQuery')
+  if (typeof query?.listSessions !== 'function') return null
+  let records
+  try {
+    records = await query.listSessions()
+  } catch {
+    return null
+  }
+  if (!Array.isArray(records) || records.length === 0) return null
+  let persisted = 0
+  for (const record of records) {
+    const id = record?.header?.id
+    if (typeof id === 'string' && id.length > 0) {
+      ids.add(id)
+      persisted += 1
+    }
+  }
+  // Records with no usable header id mean the corpus could not be read after all.
+  if (persisted === 0) return null
+  return ids
+}
+
+/**
  * Install both routes against a live `webServer`.
  * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
  * @param {{ storeRoot?: string }} [options] - test seams; the host passes none.
@@ -89,6 +157,26 @@ export function apply(ctx, options = {}) {
   const store = options.storeRoot === undefined
     ? createStore()
     : createStore({ root: options.storeRoot })
+
+  /**
+   * Best-effort orphan/TTL cleanup. Without a usable complete keep set the
+   * sweep is skipped entirely, so an unavailable session list or session corpus
+   * can never look like "every conversation was deleted"; `store.load` still
+   * enforces the TTL.
+   * @returns {Promise<void>} resolves after cleanup, never rejects.
+   */
+  const sweepStore = async () => {
+    try {
+      const liveSessionIds = await liveSessionIdsOf(ctx)
+      if (liveSessionIds === null || liveSessionIds.size === 0) return
+      await store.sweep({ liveSessionIds })
+    } catch {
+      /* Cleanup is opportunistic and must not break a request. */
+    }
+  }
+
+  // Once at startup; the session route also sweeps before answering.
+  void sweepStore()
 
   /** @returns {401 | 403 | undefined} the host fence verdict for this request. */
   const reject = (req) => {
@@ -321,6 +409,7 @@ export function apply(ctx, options = {}) {
       return
     }
     try {
+      await sweepStore()
       const state = await store.load(sessionId)
       sendJson(res, 200, { highlights: state.highlights, records: state.records })
     } catch (error) {
