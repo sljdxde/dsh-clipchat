@@ -1,0 +1,4 @@
+# Ticket 09 冒烟插件：只插入一行，卸载时删掉这一行即可。
+- insert:
+    - id: clipchat-smoke
+      name: 'dsh-clipchat-smoke'
