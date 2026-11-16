@@ -1,65 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
 import { chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { apply } from '../index.js'
+import { call, makeRequest } from './helpers/http.mjs'
 import { createStore } from '../lib/store.js'
 
 const SESSION_PATH = '/dsh-clipchat/session'
 const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
 
-class FakeResponse extends EventEmitter {
-  constructor() {
-    super()
-    this.status = 0
-    this.headers = {}
-    this.raw = ''
-    this.ended = false
-    this.writableEnded = false
-  }
-
-  writeHead(status, headers) {
-    this.status = status
-    this.headers = headers ?? {}
-    return this
-  }
-
-  write(chunk) {
-    this.raw += String(chunk)
-    return true
-  }
-
-  end(body) {
-    if (body !== undefined) this.raw += String(body)
-    this.ended = true
-    this.writableEnded = true
-  }
-}
-
-function makeRequest({ method = 'POST', url, headers = {}, body } = {}) {
-  const req = new EventEmitter()
-  req.method = method
-  req.url = url
-  req.headers = headers
-  req.destroyed = false
-  req.destroy = () => { req.destroyed = true }
-  if (body !== undefined) {
-    setImmediate(() => {
-      req.emit('data', Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)))
-      req.emit('end')
-    })
-  }
-  return req
-}
-
-async function call(handler, request) {
-  const res = new FakeResponse()
-  await handler(request, res)
-  return res
-}
 
 function payloadOf(res) {
   return JSON.parse(res.raw)
