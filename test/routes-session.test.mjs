@@ -65,7 +65,7 @@ function payloadOf(res) {
   return JSON.parse(res.raw)
 }
 
-function makeContext({ connection, sessions, workspaceRegistry } = {}) {
+function makeContext({ connection, sessions, workspaceRegistry, sessionQuery } = {}) {
   const routes = new Map()
   const disposers = []
   const webServer = {
@@ -84,7 +84,7 @@ function makeContext({ connection, sessions, workspaceRegistry } = {}) {
     },
   }
   const ctx = {
-    get: (name) => ({ connection, sessions, workspaceRegistry })[name],
+    get: (name) => ({ connection, sessions, workspaceRegistry, sessionQuery })[name],
     effect(fn) {
       const dispose = fn()
       if (typeof dispose === 'function') disposers.push(dispose)
@@ -365,6 +365,7 @@ test('apply sweeps orphans against sessions.list plus archived ids', async () =>
     connection: { requestRejection: () => undefined },
     sessions: { list: () => [{ id: 'active-1' }] },
     workspaceRegistry: { archivedSessionIds: ['archived-1'] },
+    sessionQuery: { listSessions: async () => [{ header: { id: 'active-1' } }, { header: { id: 'archived-1' } }] },
   })
 
   apply(ctx, { storeRoot })
@@ -378,6 +379,7 @@ test('GET session sweeps expired and orphaned files before serving', async () =>
   const { ctx, routes } = makeContext({
     connection: { requestRejection: () => undefined },
     sessions: { list: () => [{ id: 'active-1' }] },
+    sessionQuery: { listSessions: async () => [{ header: { id: 'active-1' } }] },
   })
   apply(ctx, { storeRoot })
   await writeSession(storeRoot, 'active-1', Date.now() - DAY)
@@ -444,6 +446,7 @@ test('malformed session entries still yield a usable set of string ids', async (
     connection: { requestRejection: () => undefined },
     // Session ids are branded strings; a mix of shapes must normalize to strings.
     sessions: { list: () => [{ id: 'active-1' }, null, { id: '' }, {}] },
+    sessionQuery: { listSessions: async () => [{ header: { id: 'active-1' } }] },
   })
   apply(ctx, { storeRoot })
 
@@ -460,6 +463,7 @@ test('a failing cleanup sweep does not turn GET session into a 500', async () =>
   const { ctx, routes } = makeContext({
     connection: { requestRejection: () => undefined },
     sessions: { list: () => [{ id: 'active-1' }] },
+    sessionQuery: { listSessions: async () => [{ header: { id: 'active-1' } }] },
   })
   apply(ctx, { storeRoot })
   // The directory is readable but not writable, so deleting the orphan rejects.
@@ -470,4 +474,95 @@ test('a failing cleanup sweep does not turn GET session into a 500', async () =>
   } finally {
     await chmod(storeRoot, 0o700)
   }
+})
+
+test('a persisted-only session is kept even when it is not live', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'live-1' }] },
+    sessionQuery: {
+      listSessions: async () => [{ header: { id: 'live-1' } }, { header: { id: 'cold-1' } }],
+    },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'live-1', Date.now() - DAY)
+  await writeSession(storeRoot, 'cold-1', Date.now() - DAY)
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('cold-1'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual((await listFiles(storeRoot)).sort(), ['cold-1.json', 'live-1.json'])
+})
+
+test('the union of live, archived and persisted ids removes a truly unknown file', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'live-1' }] },
+    workspaceRegistry: { archivedSessionIds: ['archived-1'] },
+    sessionQuery: {
+      listSessions: async () => [{ header: { id: 'live-1' } }, { header: { id: 'cold-1' } }],
+    },
+  })
+  apply(ctx, { storeRoot })
+  for (const id of ['live-1', 'archived-1', 'cold-1', 'unknown-1']) {
+    await writeSession(storeRoot, id, Date.now() - DAY)
+  }
+
+  const res = await call(routes.get(SESSION_PATH), getSession('live-1'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(
+    (await listFiles(storeRoot)).sort(),
+    ['archived-1.json', 'cold-1.json', 'live-1.json'],
+  )
+})
+
+test('cleanup is skipped when sessionQuery is missing', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'live-1' }] },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('live-1'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(await listFiles(storeRoot), ['orphan-1.json'])
+})
+
+test('cleanup is skipped when listSessions throws', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'live-1' }] },
+    sessionQuery: { listSessions: async () => { throw new Error('corpus unavailable') } },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('live-1'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(await listFiles(storeRoot), ['orphan-1.json'])
+})
+
+test('cleanup is skipped when listSessions resolves an empty corpus', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [] },
+    sessionQuery: { listSessions: async () => [] },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('session-a'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(await listFiles(storeRoot), ['orphan-1.json'])
 })

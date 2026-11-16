@@ -78,14 +78,25 @@ function sessionIdOf(req) {
 }
 
 /**
- * Session ids the host currently treats as alive. An archived conversation
- * keeps its data, so its id belongs to the keep set; an id that cannot be
- * normalized to a string is ignored.
- * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
- * @returns {Set<string> | null} the keep set, or null when the host cannot list
- *   sessions (the caller must skip the orphan sweep in that case).
+ * Add one usable session id to a keep set; blank and non-string ids are ignored.
+ * @param {Set<string>} ids - destination set.
+ * @param {unknown} value - candidate id.
+ * @returns {void}
  */
-function liveSessionIdsOf(ctx) {
+function addSessionId(ids, value) {
+  if (typeof value === 'string' && value.length > 0) ids.add(value)
+}
+
+/**
+ * Session ids the host currently treats as existing: live sessions, archived
+ * conversations and the complete persisted corpus. `sessions.list()` alone is
+ * live-only, so the persisted listing is required — without it every closed
+ * conversation would look like an orphan.
+ * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
+ * @returns {Promise<Set<string> | null>} the keep set, or null when it cannot be
+ *   established (the caller must then skip the sweep entirely).
+ */
+async function liveSessionIdsOf(ctx) {
   const sessions = ctx.get('sessions')
   if (typeof sessions?.list !== 'function') return null
   let listed
@@ -97,20 +108,40 @@ function liveSessionIdsOf(ctx) {
   if (!Array.isArray(listed)) return null
   const ids = new Set()
   for (const entry of listed) {
-    const id = typeof entry === 'string' ? entry : entry?.id
-    if (typeof id === 'string' && id.length > 0) ids.add(id)
+    addSessionId(ids, typeof entry === 'string' ? entry : entry?.id)
   }
+
+  // An archived conversation keeps its data even though it is usually not live.
   try {
     const registry = ctx.get('workspaceRegistry') ?? ctx.get('workspace')
     const archived = registry?.archivedSessionIds
     if (Array.isArray(archived)) {
-      for (const id of archived) {
-        if (typeof id === 'string' && id.length > 0) ids.add(id)
-      }
+      for (const id of archived) addSessionId(ids, id)
     }
   } catch {
     /* An unavailable registry only narrows the keep set, never widens it. */
   }
+
+  // The complete corpus: live-preferred records for every persisted session.
+  const query = ctx.get('sessionQuery')
+  if (typeof query?.listSessions !== 'function') return null
+  let records
+  try {
+    records = await query.listSessions()
+  } catch {
+    return null
+  }
+  if (!Array.isArray(records) || records.length === 0) return null
+  let persisted = 0
+  for (const record of records) {
+    const id = record?.header?.id
+    if (typeof id === 'string' && id.length > 0) {
+      ids.add(id)
+      persisted += 1
+    }
+  }
+  // Records with no usable header id mean the corpus could not be read after all.
+  if (persisted === 0) return null
   return ids
 }
 
@@ -125,14 +156,15 @@ export function apply(ctx, options = {}) {
     : createStore({ root: options.storeRoot })
 
   /**
-   * Best-effort orphan/TTL cleanup. Without a live session list the sweep is
-   * skipped entirely, so an unavailable session service can never look like
-   * "every conversation was deleted"; `store.load` still enforces the TTL.
+   * Best-effort orphan/TTL cleanup. Without a usable complete keep set the
+   * sweep is skipped entirely, so an unavailable session list or session corpus
+   * can never look like "every conversation was deleted"; `store.load` still
+   * enforces the TTL.
    * @returns {Promise<void>} resolves after cleanup, never rejects.
    */
   const sweepStore = async () => {
     try {
-      const liveSessionIds = liveSessionIdsOf(ctx)
+      const liveSessionIds = await liveSessionIdsOf(ctx)
       if (liveSessionIds === null || liveSessionIds.size === 0) return
       await store.sweep({ liveSessionIds })
     } catch {
