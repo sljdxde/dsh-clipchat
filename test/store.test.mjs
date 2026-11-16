@@ -322,7 +322,7 @@ test('sweep deletes expired files even when their session is still live', async 
   assert.deepEqual(await readdir(root), ['fresh.json'])
 })
 
-test('sweep removes a corrupt file instead of keeping it', async () => {
+test('sweep leaves a corrupt file alone', async () => {
   const root = await makeRoot()
   await writeFile(join(root, 'broken.json'), '{not json')
   await writeSession(root, 'live', NOW)
@@ -330,11 +330,11 @@ test('sweep removes a corrupt file instead of keeping it', async () => {
 
   const result = await store.sweep({ liveSessionIds: new Set(['broken', 'live']) })
 
-  assert.deepEqual(result.removed, ['broken'])
-  assert.deepEqual(await readdir(root), ['live.json'])
+  assert.deepEqual(result.removed, [])
+  assert.deepEqual((await readdir(root)).sort(), ['broken.json', 'live.json'])
 })
 
-test('sweep removes a structurally invalid state file', async () => {
+test('sweep leaves a structurally invalid state file alone', async () => {
   const root = await makeRoot()
   await writeFile(join(root, 'wrong-version.json'), JSON.stringify({ version: 99, sessionId: 'wrong-version' }))
   await writeSession(root, 'live', NOW)
@@ -342,8 +342,8 @@ test('sweep removes a structurally invalid state file', async () => {
 
   const result = await store.sweep({ liveSessionIds: new Set(['wrong-version', 'live']) })
 
-  assert.deepEqual(result.removed, ['wrong-version'])
-  assert.deepEqual(await readdir(root), ['live.json'])
+  assert.deepEqual(result.removed, [])
+  assert.deepEqual((await readdir(root)).sort(), ['live.json', 'wrong-version.json'])
 })
 
 test('sweep is skipped entirely when the live set is unavailable or empty', async () => {
@@ -378,4 +378,19 @@ test('sweep ignores files that are not clipchat state files', async () => {
 
   assert.deepEqual(result.removed, [])
   assert.deepEqual((await readdir(root)).sort(), ['.live.1.0.tmp', 'live.json', 'notes.txt'])
+})
+
+test('touch refreshes an existing file and never creates one', async () => {
+  const root = await makeRoot()
+  const first = createStore({ root, now: () => NOW })
+  await first.addHighlight('session-a', { id: 'h1', anchor: anchor(), createdAt: NOW })
+  const later = createStore({ root, now: () => NOW + 5000 })
+
+  assert.equal(await later.touch('session-a'), true)
+  const state = JSON.parse(await readFile(join(root, 'session-a.json'), 'utf8'))
+  assert.equal(state.updatedAt, NOW + 5000)
+  assert.equal(state.highlights.length, 1)
+
+  assert.equal(await later.touch('missing-session'), false)
+  assert.deepEqual(await readdir(root), ['session-a.json'])
 })

@@ -27,7 +27,8 @@ window.__ModuleLoader__.load({
       tokensOut: '输出',
       failed: '请求失败，请重试',
       network: '网络异常，请重试',
-      aborted: '已停止',
+      aborted: '已停止，可重新发送',
+      stop: '停止',
       noModel: '当前没有可用模型',
       noContext: '未能读取这条消息，请重新划选',
       selectionTooLong: '选段过长，请缩短到 2000 字以内',
@@ -37,6 +38,7 @@ window.__ModuleLoader__.load({
       highlight: '高亮这段',
       highlighted: '已高亮',
       unhighlight: '取消高亮',
+      unavailable: '当前会话只读或为子会话，暂不支持滑词提问。',
       model: '模型',
       followModel: '跟随主会话',
       invalidModel: '所选模型不可用，请换一个',
@@ -65,7 +67,8 @@ window.__ModuleLoader__.load({
       tokensOut: 'out',
       failed: 'Request failed. Try again.',
       network: 'Network error. Try again.',
-      aborted: 'Stopped',
+      aborted: 'Stopped. You can send again.',
+      stop: 'Stop',
       noModel: 'No model is available right now',
       noContext: 'Could not read this message. Select the text again.',
       selectionTooLong: 'The selection is too long. Keep it under 2000 characters.',
@@ -75,6 +78,7 @@ window.__ModuleLoader__.load({
       highlight: 'Highlight',
       highlighted: 'Highlighted',
       unhighlight: 'Remove highlight',
+      unavailable: 'This conversation is read-only or a subagent, so clipchat is unavailable.',
       model: 'Model',
       followModel: 'Follow main session',
       invalidModel: 'That model is not available. Pick another.',
@@ -913,6 +917,23 @@ window.__ModuleLoader__.load({
       return `${prefix}回答：${a.slice(0, room)}…`
     }
 
+    /** Shown when the host has no writable quote surface (read-only / subagent). */
+    function ClipNotice(props) {
+      const { dismiss, translate } = props
+      return h('div', { className: 'clipchat-card' },
+        h('div', { className: 'clipchat-card__head' },
+          h('span', null, translate('title')),
+          h('button', {
+            type: 'button',
+            className: 'clipchat-card__close',
+            'aria-label': translate('close'),
+            title: translate('close'),
+            onClick: () => dismiss(),
+          }, '×')),
+        h('div', { className: 'clipchat-card__hint' }, translate('unavailable')),
+      )
+    }
+
     function ClipMenu(props) {
       const { Original, dismiss, readText, translate } = props
       const [requestedHighlight] = React.useState(() => { const id = pendingHighlightId; pendingHighlightId = null; return id })
@@ -1034,7 +1055,6 @@ window.__ModuleLoader__.load({
             return
           }
 
-          if (current()) setDraft('')
           const reader = response.body?.getReader?.()
           if (reader === undefined) {
             if (current()) {
@@ -1075,6 +1095,7 @@ window.__ModuleLoader__.load({
 
           if (current()) setStreaming(false)
           if (current() && !failed && text.length > 0) {
+            setDraft('')
             setAnswered({ question: request.question, answer: text })
             setHistory((previous) => [
               ...previous,
@@ -1083,7 +1104,14 @@ window.__ModuleLoader__.load({
             ].slice(-HISTORY_LIMIT))
           }
         } catch (thrown) {
-          if (thrown?.name === 'AbortError' || requestIdRef.current !== requestId) return
+          if (requestIdRef.current !== requestId) return
+          if (thrown?.name === 'AbortError') {
+            if (current()) {
+              setStreaming(false)
+              setError(translate('aborted'))
+            }
+            return
+          }
           if (current()) {
             setError(translate('network'))
             setStreaming(false)
@@ -1270,9 +1298,9 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'clipchat-card__send',
-            disabled: streaming || draft.trim().length === 0,
-            onClick: send,
-          }, streaming ? translate('sending') : translate('send')),
+            disabled: streaming ? false : draft.trim().length === 0,
+            onClick: streaming ? () => controllerRef.current?.abort() : send,
+          }, streaming ? translate('stop') : translate('send')),
         ),
 
         h('div', { className: 'clipchat-card__modelrow' },
@@ -1349,6 +1377,22 @@ window.__ModuleLoader__.load({
       }, 'clipchat: styles')
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'clipchat: dictionaries')
       const translate = ctx.locale.bind(NS)
+      if (ctx.uiConversation !== undefined && ctx.uiConversation?.interactions !== undefined) {
+        ctx.effect(() => ctx.uiConversation.interactions.register({
+          id: 'clipchat',
+          onInteraction(request) {
+            if (request.trigger !== 'selection') return
+            if (request.readText() === null) return
+            request.open()
+          },
+        }), 'clipchat: fallback interaction')
+        ctx.effect(() => ctx.slots.inject('conversation.chat.text-interaction', () => ctx.slots.register({
+          name: 'conversation.chat.text-interaction',
+          key: 'clipchat',
+          locale: NS,
+        }, ClipNotice)), 'clipchat: fallback surface')
+      }
+
       ctx.effect(() => {
         ensureObserver()
         renderAll()
@@ -1411,7 +1455,7 @@ window.__ModuleLoader__.load({
 
     return {
       name: 'clipchat',
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'uiConversation'],
       apply,
       __test: {
         isAssistantNodeKey,

@@ -34,5 +34,8 @@
         "@deepseek-ai/dsh-client-locale"
       ]
     }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
   }
 }

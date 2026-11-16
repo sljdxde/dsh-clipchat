@@ -92,7 +92,7 @@ DSH 的回复经常很长。用户读到其中某一段想追问时，只能把�
 所有路由先过 `connection.requestRejection(req)`，被拒时返回 401/403 JSON。请求体上限 512 KB。
 
 * `GET /dsh-clipchat/status` → `{ ok, guard, model: { provider, model, reasoningEffort? } | null }`，用于开发自检。
-* `GET /dsh-clipchat/models?sessionId=` → `{ models: [{ provider, model, name, isDefault }] }`；由 host 汇总 `llm.listProviders()` 与各 provider 的模型；失败时至少返回会话当前模型，前端只显示可用项。
+* `GET /dsh-clipchat/models?sessionId=` → `{ models: [{ provider, model, name, isDefault }], current }`；由 host 汇总 `llm.listProviders()` 与各 provider 的模型；失败时至少返回会话当前模型，前端只显示可用项。
 * `POST /dsh-clipchat/ask` → SSE。请求体 `{ sessionId, selection, message, recent, history, question, model? }`；`model` 省略表示跟随主会话。
   * SSE 帧：`meta {provider, model}`、`delta {text}`、`usage {inputTokens, outputTokens}`、`done {reason, firstTokenMs}`、`error {message}`。
   * 客户端断开时 `res.on('close')` 触发 abort，取消上游调用。
@@ -160,6 +160,7 @@ DSH 的回复经常很长。用户读到其中某一段想追问时，只能把�
 * 归档：不清理；取消归档可恢复。
 * 永久删除：孤儿清理。完整会话集合 = `sessions.list()` 的 id 并上 `workspace.archivedSessionIds`；文件对应的 session 不在集合内即删除。启动时跑一次，读取时顺带跑。
 * 卸载插件不主动删数据，交给 TTL。
+* sweep 只处理孤儿与过期；无法解析的文件保持原样，避免误删。
 
 ### 7. 高亮锚点与渲染
 
@@ -168,7 +169,7 @@ DSH 的回复经常很长。用户读到其中某一段想追问时，只能把�
 * 重锚定：先用 `useChat` 的 `nodes.get(key)` 取节点；块文本与锚点文本一致则按偏移标；不一致时用选段文本在该消息内做前缀搜索；仍失败则保留数据、暂不渲染，下次渲染再试。
 * 未加载的分页消息不渲染；消息进入窗口后由渲染钩子补标。
 * 用 `MutationObserver`（100ms 防抖）监听消息区变化并重画；窗口 resize 也重画；忽略 overlay 自身的变化，避免自触发。
-* 高亮点击打开卡片并载入对应记录，不抢输入焦点；点击不改变浏览器选区。
+* 高亮点击通过选中该高亮段唤起宿主 surface，卡片载入记录且不抢输入焦点；浏览器选区会短暂落到该高亮上（宿主 surface 只能由选区唤起）。
 
 ### 8. 卡片交互
 
@@ -179,7 +180,7 @@ DSH 的回复经常很长。用户读到其中某一段想追问时，只能把�
 * 流式期间显示部分答案与停止按钮；停止或关闭卡片 abort 请求。
 * 每次回答结束显示 `in X / out Y` token；不估算费用。
 * 关闭时未点「留痕」的问答只存在于内存，直接丢弃；不弹确认。
-* 「高亮这段」在首次提交时写入，重复点击提示已高亮。
+* 「高亮这段」在首次提交时写入；已高亮后按钮变为「取消高亮」，删除并同步存储。
 
 ### 9. 留痕与带回主线
 

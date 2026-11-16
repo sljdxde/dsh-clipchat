@@ -563,9 +563,9 @@ test('GET models lists the provider catalog and the session route behind the gua
   assert.equal(res.status, 200)
   assert.deepEqual(JSON.parse(res.raw), {
     models: [
-      { provider: 'alpha', model: 'a1', name: 'A1' },
-      { provider: 'alpha', model: 'a2', name: 'A2' },
-      { provider: 'beta', model: 'b1', name: 'B1' },
+      { provider: 'alpha', model: 'a1', name: 'A1', isDefault: false },
+      { provider: 'alpha', model: 'a2', name: 'A2', isDefault: true },
+      { provider: 'beta', model: 'b1', name: 'B1', isDefault: false },
     ],
     current: { provider: 'alpha', model: 'a2' },
   })
@@ -590,7 +590,7 @@ test('GET models falls back to the configured default when listing fails', async
 
   assert.equal(res.status, 200)
   assert.deepEqual(JSON.parse(res.raw), {
-    models: [{ provider: 'deepseek', model: 'chat', name: 'chat' }],
+    models: [{ provider: 'deepseek', model: 'chat', name: 'chat', isDefault: true }],
     current: { provider: 'deepseek', model: 'chat' },
   })
 })

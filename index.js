@@ -240,6 +240,14 @@ export function apply(ctx, options = {}) {
       return
     }
 
+    if (typeof body?.sessionId === 'string' && isValidSessionId(body.sessionId)) {
+      try {
+        await store.touch(body.sessionId)
+      } catch {
+        /* Retention is best-effort; the answer still proceeds. */
+      }
+    }
+
     if (Array.isArray(body?.history) && body.history.length > LIMITS.historyMessages) {
       sendJson(res, 400, {
         error: 'history-too-long',
@@ -388,7 +396,15 @@ export function apply(ctx, options = {}) {
       const { models, current } = await listModelChoices(ctx, {
         sessionId: sessionId ?? undefined,
       })
-      sendJson(res, 200, { models, current })
+      sendJson(res, 200, {
+        models: models.map((entry) => ({
+          ...entry,
+          isDefault: current !== null
+            && entry.provider === current.provider
+            && entry.model === current.model,
+        })),
+        current,
+      })
     } catch (error) {
       sendJson(res, 500, { error: 'models-unavailable', message: String(error?.message ?? error) })
     }
@@ -419,8 +435,12 @@ export function apply(ctx, options = {}) {
     }
   }
 
-  /** `POST /dsh-clipchat/highlight`: add or remove one highlight, then return the list. */
-  const handleHighlight = async (req, res) => {
+  /**
+   * Build one add/remove entity route over the session store.
+   * @param {{ noun: string, listKey: string, validate: Function, add: Function, remove: Function }} shape - entity contract.
+   * @returns {Function} the request handler.
+   */
+  const entityRoute = ({ noun, listKey, validate, add, remove }) => async (req, res) => {
     if (guard(req, res)) return
     if (req.method !== 'POST') {
       sendJson(res, 405, { error: 'method-not-allowed' })
@@ -457,83 +477,40 @@ export function apply(ctx, options = {}) {
 
     try {
       if (op === 'add') {
-        if (!isValidHighlight(body.highlight)) {
-          sendJson(res, 400, { error: 'invalid-highlight' })
+        if (!validate(body[noun])) {
+          sendJson(res, 400, { error: `invalid-${noun}` })
           return
         }
-        const state = await store.addHighlight(sessionId, body.highlight)
-        sendJson(res, 200, { highlights: state.highlights })
+        const state = await add(sessionId, body[noun])
+        sendJson(res, 200, { [listKey]: state[listKey] })
         return
       }
-      const id = body?.highlight?.id
+      const id = body?.[noun]?.id
       if (typeof id !== 'string' || id.length === 0) {
-        sendJson(res, 400, { error: 'invalid-highlight' })
+        sendJson(res, 400, { error: `invalid-${noun}` })
         return
       }
-      const state = await store.removeHighlight(sessionId, id)
-      sendJson(res, 200, { highlights: state.highlights })
+      const state = await remove(sessionId, id)
+      sendJson(res, 200, { [listKey]: state[listKey] })
     } catch (error) {
       sendJson(res, 500, { error: 'store-unavailable', message: String(error?.message ?? error) })
     }
   }
 
-  /** `POST /dsh-clipchat/record`: add or remove one 留痕 record, then return the list. */
-  const handleRecord = async (req, res) => {
-    if (guard(req, res)) return
-    if (req.method !== 'POST') {
-      sendJson(res, 405, { error: 'method-not-allowed' })
-      return
-    }
-
-    let body
-    try {
-      body = await readJsonBody(req)
-    } catch (error) {
-      const invalid = error instanceof RequestBodyError
-      sendJson(res, invalid && error.code === 'body-too-large' ? 413 : 400, {
-        error: invalid ? error.code : 'invalid-request',
-        message: String(error?.message ?? error),
-      })
-      return
-    }
-
-    const sessionId = body?.sessionId
-    if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      sendJson(res, 400, { error: 'missing-session-id' })
-      return
-    }
-    if (!isValidSessionId(sessionId)) {
-      sendJson(res, 400, { error: 'invalid-session-id' })
-      return
-    }
-
-    const op = body?.op
-    if (op !== 'add' && op !== 'remove') {
-      sendJson(res, 404, { error: 'unknown-op' })
-      return
-    }
-
-    try {
-      if (op === 'add') {
-        if (!isValidRecord(body.record)) {
-          sendJson(res, 400, { error: 'invalid-record' })
-          return
-        }
-        const state = await store.addRecord(sessionId, body.record)
-        sendJson(res, 200, { records: state.records })
-        return
-      }
-      const id = body?.record?.id
-      if (typeof id !== 'string' || id.length === 0) {
-        sendJson(res, 400, { error: 'invalid-record' })
-        return
-      }
-      const state = await store.removeRecord(sessionId, id)
-      sendJson(res, 200, { records: state.records })
-    } catch (error) {
-      sendJson(res, 500, { error: 'store-unavailable', message: String(error?.message ?? error) })
-    }
-  }
+  const handleHighlight = entityRoute({
+    noun: 'highlight',
+    listKey: 'highlights',
+    validate: isValidHighlight,
+    add: (sessionId, value) => store.addHighlight(sessionId, value),
+    remove: (sessionId, value) => store.removeHighlight(sessionId, value),
+  })
+  const handleRecord = entityRoute({
+    noun: 'record',
+    listKey: 'records',
+    validate: isValidRecord,
+    add: (sessionId, value) => store.addRecord(sessionId, value),
+    remove: (sessionId, value) => store.removeRecord(sessionId, value),
+  })
 
   // A child fiber declaring the dependency is what exposes `scope.webServer`.
   ctx.inject(['webServer'], (scope) => {
