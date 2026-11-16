@@ -1472,6 +1472,7 @@ window.__ModuleLoader__.load({
         anchorFromSelection,
         resolvedSpanAt,
         summarizeAnswer,
+        ClipNotice,
         currentSessionIdOf,
         highlightIdOf,
         hasHighlight,

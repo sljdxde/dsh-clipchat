@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run the repo check before every commit; bypass deliberately with: git commit --no-verify
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec node scripts/check.mjs

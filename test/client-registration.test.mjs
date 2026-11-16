@@ -1,33 +1,7 @@
+import { loadBundle, makeReact } from './helpers/load-client.mjs'
+
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-
-function makeReact() {
-  return {
-    createElement: (...args) => ({ args }),
-    useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
-    useEffect: () => {},
-    useRef: () => ({ current: null }),
-    Fragment: 'Fragment',
-  }
-}
-
-let bundleSequence = 0
-
-async function loadBundle() {
-  let definition
-  const styles = []
-  globalThis.window = { __ModuleLoader__: { load(value) { definition = value } } }
-  globalThis.document = {
-    head: { appendChild(node) { styles.push(node) } },
-    createElement() {
-      return { dataset: {}, style: {}, textContent: '', remove() {} }
-    },
-  }
-  const url = new URL('../client.js', import.meta.url)
-  await import(`${url.href}?v=${++bundleSequence}`)
-  assert.ok(definition, 'bundle called __ModuleLoader__.load')
-  return { definition, styles }
-}
 
 function makeContext(entries) {
   const disposers = []

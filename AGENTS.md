@@ -7,13 +7,15 @@ DSH Web plugin for selecting a passage in an assistant reply, asking about it in
 - `index.js` — host half: webServer routes (`status`, `ask`, `models`, `session`, `highlight`, `record`), guard, model resolution, store wiring.
 - `client.js` — browser half: wraps the native quote `text-interaction` slot, menu/card UI, SSE streaming, highlight overlay, records. Single hand-written bundle, no build step.
 - `lib/` — host-side modules: `context`, `http`, `model`, `models`, `store`.
-- `test/` — `node:test` suites. No test framework dependency.
-- `locale/`, `docs/`, `icon.svg` — bundle display metadata.
+- `test/` — `node:test` suites; shared harnesses in `test/helpers/`.
+- `docs/ACCEPTANCE.md` — manual acceptance checklist. `docs/decisions/` — ADRs.
+- `CODING_STANDARDS.md` — reviewer-facing judgement rules.
 
 ## Commands
 
-- Test: `node --test test/*.test.mjs`
-- Install locally (dev): point the DSH plugin manager at this directory (or a symlink without a trailing space — the workspace directory name ends with a space, which path-normalizing installers trim).
+- Check (syntax + tests): `npm run check` — also runs in the `.githooks/pre-commit` hook.
+- Install locally (dev): `scripts/dev-link.sh` creates `/tmp/dsh-clipchat-dev` because the workspace path ends with a space, which installers trim.
+- After changing host code, disable/enable the bundle to reload it; client changes reload on page refresh.
 
 ## Facts
 
