@@ -919,18 +919,18 @@ window.__ModuleLoader__.load({
 
     /** Shown when the host has no writable quote surface (read-only / subagent). */
     function ClipNotice(props) {
-      const { dismiss, translate } = props
+      const { dismiss, t } = props
       return h('div', { className: 'clipchat-card' },
         h('div', { className: 'clipchat-card__head' },
-          h('span', null, translate('title')),
+          h('span', null, t('title')),
           h('button', {
             type: 'button',
             className: 'clipchat-card__close',
-            'aria-label': translate('close'),
-            title: translate('close'),
+            'aria-label': t('close'),
+            title: t('close'),
             onClick: () => dismiss(),
           }, '×')),
-        h('div', { className: 'clipchat-card__hint' }, translate('unavailable')),
+        h('div', { className: 'clipchat-card__hint' }, t('unavailable')),
       )
     }
 
@@ -1383,6 +1383,8 @@ window.__ModuleLoader__.load({
           onInteraction(request) {
             if (request.trigger !== 'selection') return
             if (request.readText() === null) return
+            const registered = ctx.uiConversation.interactions?.getSnapshot?.() ?? []
+            if (Array.isArray(registered) && registered.includes('quote')) return
             request.open()
           },
         }), 'clipchat: fallback interaction')

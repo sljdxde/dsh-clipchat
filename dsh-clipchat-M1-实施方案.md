@@ -1,6 +1,6 @@
 # dsh-clipchat M1 实施方案
 
-Status: ready-for-agent
+Status: implemented (feat/m1, 2026-11-16)
 Date: 2026-11-16
 
 > 唤醒方式已定：左键选区 → 原生「引用文本」+「问这段」小菜单；点「问」展开卡片（[票据 11](.scratch/dsh-clipchat/issues/11-trigger-model.md)）。
