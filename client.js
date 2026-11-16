@@ -43,6 +43,9 @@ window.__ModuleLoader__.load({
       record: '留痕',
       recorded: '已留痕',
       records: '留痕',
+      backToMain: '带回主线',
+      inserted: '已插入',
+      insertFailed: '无法插入，请手动复制',
       currentSelection: '当前选段',
       deleteRecord: '删除',
       noRecords: '本会话暂无留痕',
@@ -77,6 +80,9 @@ window.__ModuleLoader__.load({
       record: 'Keep',
       recorded: 'Kept',
       records: 'Kept',
+      backToMain: 'Send to main',
+      inserted: 'Inserted',
+      insertFailed: 'Could not insert. Copy manually.',
       currentSelection: 'This passage',
       deleteRecord: 'Delete',
       noRecords: 'No kept answers yet',
@@ -860,6 +866,18 @@ window.__ModuleLoader__.load({
       return text.length <= limit ? text : `${text.slice(0, limit)}…`
     }
 
+    /** One-line summary of a Q&A for the main composer, capped at 200 chars. */
+    function summarizeAnswer(question, answer, limit = 200) {
+      const q = typeof question === 'string' ? question.trim() : ''
+      const a = typeof answer === 'string' ? answer.trim() : ''
+      if (a.length === 0) return ''
+      const prefix = q.length > 0 ? `问题：${q}\n` : ''
+      const full = `${prefix}回答：${a}`
+      if (full.length <= limit) return full
+      const room = Math.max(0, limit - prefix.length - '回答：'.length - 1)
+      return `${prefix}回答：${a.slice(0, room)}…`
+    }
+
     function ClipMenu(props) {
       const { Original, dismiss, readText, translate } = props
       const [expanded, setExpanded] = React.useState(false)
@@ -891,7 +909,7 @@ window.__ModuleLoader__.load({
     }
 
     function ClipCard(props) {
-      const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat } = props
+      const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat, inputActions } = props
       const textareaRef = React.useRef(null)
       const controllerRef = React.useRef(null)
       const requestIdRef = React.useRef(0)
@@ -908,6 +926,7 @@ window.__ModuleLoader__.load({
       const [meta, setMeta] = React.useState(null)
       const [answered, setAnswered] = React.useState(null)
       const [recordsOpen, setRecordsOpen] = React.useState(false)
+      const [insertState, setInsertState] = React.useState('idle')
       const [, bumpRecords] = React.useState(0)
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
@@ -1058,6 +1077,7 @@ window.__ModuleLoader__.load({
         setAnswer('')
         setError('')
         setTokens(null)
+        setInsertState('idle')
         setAnswered(null)
 
         const request = {
@@ -1104,6 +1124,28 @@ window.__ModuleLoader__.load({
         if (entry === null) return
         addRecord(entry, sessionId)
         bumpRecords((value) => value + 1)
+      }
+
+      /** Insert the selection quote plus a short Q&A summary into the main composer. */
+      const backToMain = () => {
+        if (answered === null) return
+        const summary = summarizeAnswer(answered.question, answered.answer)
+        if (summary.length === 0) return
+        const text = `\n\n〔滑词〕${summary}`
+        const plain = `> ${selection}${text}`
+        try {
+          let ok = false
+          if (typeof inputActions?.insertQuote === 'function'
+            && typeof inputActions?.captureInsertion === 'function'
+            && typeof inputActions?.insertText === 'function') {
+            const accepted = inputActions.insertQuote(selection)
+            const span = inputActions.captureInsertion()
+            ok = inputActions.insertText(accepted ? text : plain, span)
+          }
+          setInsertState(ok ? 'inserted' : 'failed')
+        } catch {
+          setInsertState('failed')
+        }
       }
 
       /** Delete one record from memory and from the store. */
@@ -1234,11 +1276,23 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'clipchat-actions__btn',
+            disabled: streaming || answered === null || insertState === 'inserted',
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: backToMain,
+          }, insertState === 'inserted' ? translate('inserted') : translate('backToMain')),
+          h('button', {
+            type: 'button',
+            className: 'clipchat-actions__btn',
             'aria-expanded': recordsOpen,
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => setRecordsOpen((open) => !open),
           }, `${translate('records')} ${recordEntries.length}`),
         ),
+        insertState === 'failed'
+          ? h('div', { className: 'clipchat-card__error', role: 'alert' }, translate('insertFailed'))
+          : insertState === 'inserted'
+            ? h('div', { className: 'clipchat-card__hint' }, translate('inserted'))
+            : null,
         recordsOpen ? h('div', { className: 'clipchat-card__records' },
           recordEntries.length === 0
             ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
@@ -1315,6 +1369,7 @@ window.__ModuleLoader__.load({
         segmentsForSpan,
         anchorFromSelection,
         resolvedSpanAt,
+        summarizeAnswer,
         currentSessionIdOf,
         highlightIdOf,
         hasHighlight,
