@@ -5,6 +5,8 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const NS = 'clipchat'
     const ASK_PATH = '/dsh-clipchat/ask'
+    const SESSION_PATH = '/dsh-clipchat/session'
+    const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
     const HISTORY_LIMIT = 12
     const RECENT_LIMIT = 3
 
@@ -31,6 +33,7 @@ window.__ModuleLoader__.load({
       forbidden: '没有权限或登录已失效，请刷新页面',
       highlight: '高亮这段',
       highlighted: '已高亮',
+      unhighlight: '取消高亮',
     }
     const en = {
       ask: 'Ask about this',
@@ -55,6 +58,7 @@ window.__ModuleLoader__.load({
       forbidden: 'Not allowed, or the session expired. Refresh the page.',
       highlight: 'Highlight',
       highlighted: 'Highlighted',
+      unhighlight: 'Remove highlight',
     }
 
     const css = `
@@ -109,6 +113,15 @@ window.__ModuleLoader__.load({
     /** Assistant message keys look like `14:assistant-step11:3`; user keys do not. */
     function isAssistantNodeKey(key) {
       return typeof key === 'string' && /(?:^|:)assistant-step/u.test(key)
+    }
+
+    /** Session id of the conversation currently on screen, when the host marks it. */
+    function currentSessionIdOf() {
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null
+      const scoped = document.querySelector('[data-conversation-scroll] [data-conversation-session]')
+      const holder = scoped ?? document.querySelector('[data-conversation-session]')
+      if (holder === null || holder === undefined || typeof holder.getAttribute !== 'function') return null
+      return holder.getAttribute('data-conversation-session')
     }
 
     const BLOCK_TAGS = new Set([
@@ -195,34 +208,145 @@ window.__ModuleLoader__.load({
       return segments
     }
 
-    /** Stored highlights (memory only in ticket 15). */
+    /** Stored highlights keyed by id: `{ id, anchor, createdAt }`. */
     const highlights = new Map()
     let nextHighlightId = 1
+    let loadedSessionId = null
+    let loadToken = 0
+    let sessionTimer
     let applying = false
     let observer = null
     let observerTimer
     let observerOptions = { childList: true, subtree: true, characterData: true }
 
+    /** @returns {string | null} id of the highlight covering this exact passage. */
+    function highlightIdOf(nodeKey, text) {
+      for (const [id, entry] of highlights) {
+        const anchor = entry?.anchor
+        if (anchor?.nodeKey === nodeKey && anchor.text === text) return id
+      }
+      return null
+    }
+
     /** @returns {boolean} whether this exact passage already has a highlight. */
     function hasHighlight(nodeKey, text) {
-      for (const anchor of highlights.values()) {
-        if (anchor.nodeKey === nodeKey && anchor.text === text) return true
-      }
-      return false
+      return highlightIdOf(nodeKey, text) !== null
+    }
+
+    /** A client-generated id; the host stores it verbatim. */
+    function newHighlightId() {
+      return `h${Date.now().toString(36)}${(nextHighlightId++).toString(36)}`
+    }
+
+    /** Session id for a write: the visible conversation, then the card's own. */
+    function writeSessionId(fallback) {
+      const live = currentSessionIdOf()
+      if (typeof live === 'string' && live.length > 0) return live
+      return typeof fallback === 'string' && fallback.length > 0 ? fallback : null
     }
 
     /**
-     * Store one highlight and schedule a render.
+     * Persist one add/remove; a failed write keeps the local highlight visible.
+     * @param {'add' | 'remove'} op - store operation.
+     * @param {object} payload - the highlight entry, or `{ id }` for removals.
+     * @param {string} [fallbackSessionId] - card session id when the DOM has none.
+     */
+    async function persistHighlight(op, payload, fallbackSessionId) {
+      const sessionId = writeSessionId(fallbackSessionId)
+      if (sessionId === null || typeof fetch !== 'function') return
+      try {
+        const response = await fetch(HIGHLIGHT_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId, op, highlight: payload }),
+        })
+        if (response.ok !== true) throw new Error(`status ${response.status}`)
+      } catch (error) {
+        console.warn('dsh-clipchat: highlight was not saved', error)
+      }
+    }
+
+    /**
+     * Store one highlight locally, then persist it.
      * @param {ReturnType<typeof anchorFromSelection>} anchor - captured anchor.
      * @returns {string | null} highlight id.
      */
     function addHighlight(anchor) {
       if (anchor === null) return null
       if (hasHighlight(anchor.nodeKey, anchor.text)) return null
-      const id = `h${nextHighlightId++}`
-      highlights.set(id, Object.assign({ id }, anchor))
+      const entry = {
+        id: newHighlightId(),
+        anchor: Object.assign({}, anchor),
+        createdAt: Date.now(),
+      }
+      highlights.set(entry.id, entry)
       scheduleRender()
-      return id
+      void persistHighlight('add', entry)
+      return entry.id
+    }
+
+    /**
+     * Drop one highlight from memory and redraw.
+     * @param {string} id - highlight id.
+     * @returns {boolean} whether it existed.
+     */
+    function removeHighlight(id) {
+      const removed = highlights.delete(id)
+      if (removed) renderAll()
+      return removed
+    }
+
+    /**
+     * Replace the in-memory store with the visible session's persisted state.
+     * The old overlay is cleared before the request so a switch never flashes
+     * the previous conversation's marks.
+     * @param {string | null} sessionId - conversation to load.
+     */
+    async function loadSession(sessionId) {
+      const token = ++loadToken
+      highlights.clear()
+      loadedSessionId = sessionId ?? null
+      renderAll()
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return
+      if (typeof fetch !== 'function') return
+      try {
+        const response = await fetch(`${SESSION_PATH}?sessionId=${encodeURIComponent(sessionId)}`)
+        if (token !== loadToken) return
+        if (response.ok !== true) throw new Error(`status ${response.status}`)
+        const payload = await response.json()
+        if (token !== loadToken) return
+        highlights.clear()
+        for (const entry of Array.isArray(payload?.highlights) ? payload.highlights : []) {
+          if (entry === null || typeof entry !== 'object') continue
+          if (typeof entry.id !== 'string' || entry.anchor === null || typeof entry.anchor !== 'object') continue
+          highlights.set(entry.id, {
+            id: entry.id,
+            anchor: entry.anchor,
+            createdAt: entry.createdAt,
+          })
+        }
+        renderAll()
+      } catch (error) {
+        if (token !== loadToken) return
+        console.warn('dsh-clipchat: session highlights were not loaded', error)
+      }
+    }
+
+    /** Load the visible session's highlights when the conversation changes. */
+    function maybeLoadSession() {
+      const sessionId = currentSessionIdOf()
+      if (sessionId === loadedSessionId) return undefined
+      return loadSession(sessionId)
+    }
+
+    /** Debounced session-switch detection driven by the chat observer. */
+    function scheduleSessionCheck() {
+      if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return
+      if (sessionTimer !== undefined) return
+      sessionTimer = window.setTimeout(() => {
+        sessionTimer = undefined
+        void maybeLoadSession()
+      }, 100)
     }
 
     /** Ensure the overlay layer inside one chat column. */
@@ -268,6 +392,15 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Every rendered element carrying one chat node key, safely. */
+    function nodesFor(nodeKey) {
+      try {
+        return document.querySelectorAll(`[data-chat-node-key="${nodeKey.replace(/["\\]/g, '\\$&')}"]`)
+      } catch {
+        return []
+      }
+    }
+
     /** Redraw every highlight as absolutely positioned rects over the chat. */
     function renderAll() {
       if (typeof document === 'undefined' || document.body === null || document.body === undefined
@@ -281,13 +414,17 @@ window.__ModuleLoader__.load({
       const columnRect = column.getBoundingClientRect()
       const scaleX = column.offsetWidth === 0 ? 1 : columnRect.width / column.offsetWidth
       const scaleY = column.offsetHeight === 0 ? 1 : columnRect.height / column.offsetHeight
-      for (const [id, anchor] of highlights) {
-        const candidates = document.querySelectorAll(`[data-chat-node-key="${anchor.nodeKey}"]`)
+      for (const [id, entry] of highlights) {
+        const anchor = entry?.anchor
+        if (anchor === null || anchor === undefined || typeof anchor.nodeKey !== 'string') continue
+        const spans = Array.isArray(anchor.spans) ? anchor.spans : []
+        const sourceIndex = Number.isInteger(anchor.sourceIndex) ? anchor.sourceIndex : 0
+        const candidates = nodesFor(anchor.nodeKey)
         for (const node of candidates) {
-          const source = node.querySelectorAll('[data-text-interaction-source]')[anchor.sourceIndex]
+          const source = node.querySelectorAll('[data-text-interaction-source]')[sourceIndex]
           if (source === undefined) continue
           const blocks = blocksOf(source)
-          for (const span of anchor.spans) {
+          for (const span of spans) {
             const block = blocks[span.blockIndex]
             if (block === undefined) continue
             const range = rangeForSpan(block, span.start, span.end)
@@ -330,6 +467,7 @@ window.__ModuleLoader__.load({
         if (applying) return
         if (records.every((record) => record.target.nodeType === 1
           && record.target.closest('.clipchat-layer') !== null)) return
+        scheduleSessionCheck()
         scheduleRender()
       })
       observer.observe(document.body, observerOptions)
@@ -698,11 +836,20 @@ window.__ModuleLoader__.load({
             disabled: highlighted,
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => {
-              if (highlighted) return
-              addHighlight(anchor)
-              setHighlighted(true)
+              if (highlighted) {
+                const id = highlightIdOf(nodeKey, selection)
+                if (id === null) {
+                  setHighlighted(false)
+                  return
+                }
+                removeHighlight(id)
+                setHighlighted(false)
+                void persistHighlight('remove', { id }, sessionId)
+                return
+              }
+              if (addHighlight(anchor) !== null) setHighlighted(true)
             },
-          }, highlighted ? translate('highlighted') : translate('highlight')),
+          }, highlighted ? translate('unhighlight') : translate('highlight')),
         ),
       )
     }
@@ -717,6 +864,7 @@ window.__ModuleLoader__.load({
       ctx.effect(() => {
         ensureObserver()
         renderAll()
+        void maybeLoadSession()
         const onResize = () => scheduleRender()
         if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
           window.addEventListener('resize', onResize)
@@ -773,6 +921,11 @@ window.__ModuleLoader__.load({
         errorMessageOf,
         segmentsForSpan,
         anchorFromSelection,
+        currentSessionIdOf,
+        highlightIdOf,
+        hasHighlight,
+        loadSession,
+        maybeLoadSession,
       },
     }
   },

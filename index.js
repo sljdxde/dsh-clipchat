@@ -1,13 +1,16 @@
 /**
  * dsh-clipchat host half.
  *
- * Two routes, both behind the host's own request fence:
- *   GET  /dsh-clipchat/status  → { ok, guard, model } for development self-checks
- *   POST /dsh-clipchat/ask     → SSE answer for one in-card question
+ * Four routes, all behind the host's own request fence:
+ *   GET  /dsh-clipchat/status    → { ok, guard, model } for development self-checks
+ *   POST /dsh-clipchat/ask       → SSE answer for one in-card question
+ *   GET  /dsh-clipchat/session   → { highlights, records } of one conversation
+ *   POST /dsh-clipchat/highlight → { highlights } after an add or remove
  *
  * The ask route only calls `llm.stream`: it never writes a session, never
  * creates a hidden one and never declares tools. The client closing the SSE
- * response aborts the upstream call.
+ * response aborts the upstream call. Highlight state lives in the clipchat
+ * store, never in the host session.
  *
  * @module dsh-clipchat
  */
@@ -21,10 +24,13 @@ import {
   RequestBodyError, openSse, readJsonBody, sameOriginRejection, sendJson, writeFrame,
 } from './lib/http.js'
 import { resolveModel } from './lib/model.js'
+import { createStore, isValidHighlight, isValidSessionId } from './lib/store.js'
 
 const PREFIX = '/dsh-clipchat'
 const STATUS_PATH = `${PREFIX}/status`
 const ASK_PATH = `${PREFIX}/ask`
+const SESSION_PATH = `${PREFIX}/session`
+const HIGHLIGHT_PATH = `${PREFIX}/highlight`
 const ANSWER_MAX_TOKENS = 2048
 
 /**
@@ -58,10 +64,29 @@ async function loadLlmHelpers() {
 }
 
 /**
+ * Session id of a reader request, from its query string.
+ * @param {import('node:http').IncomingMessage} req - the request.
+ * @returns {string | null} the raw value, or null when absent.
+ */
+function sessionIdOf(req) {
+  const raw = typeof req.url === 'string' ? req.url : ''
+  try {
+    return new URL(raw, 'http://localhost').searchParams.get('sessionId')
+  } catch {
+    return null
+  }
+}
+
+/**
  * Install both routes against a live `webServer`.
  * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
+ * @param {{ storeRoot?: string }} [options] - test seams; the host passes none.
  */
-export function apply(ctx) {
+export function apply(ctx, options = {}) {
+  const store = options.storeRoot === undefined
+    ? createStore()
+    : createStore({ root: options.storeRoot })
+
   /** @returns {401 | 403 | undefined} the host fence verdict for this request. */
   const reject = (req) => {
     const connection = ctx.get('connection')
@@ -245,6 +270,88 @@ export function apply(ctx) {
     }
   }
 
+  /** `GET /dsh-clipchat/session`: persisted highlights and records of one conversation. */
+  const handleSession = async (req, res) => {
+    if (guard(req, res)) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+    const sessionId = sessionIdOf(req)
+    if (sessionId === null || sessionId.length === 0) {
+      sendJson(res, 400, { error: 'missing-session-id' })
+      return
+    }
+    if (!isValidSessionId(sessionId)) {
+      sendJson(res, 400, { error: 'invalid-session-id' })
+      return
+    }
+    try {
+      const state = await store.load(sessionId)
+      sendJson(res, 200, { highlights: state.highlights, records: state.records })
+    } catch (error) {
+      sendJson(res, 500, { error: 'store-unavailable', message: String(error?.message ?? error) })
+    }
+  }
+
+  /** `POST /dsh-clipchat/highlight`: add or remove one highlight, then return the list. */
+  const handleHighlight = async (req, res) => {
+    if (guard(req, res)) return
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+
+    let body
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      const invalid = error instanceof RequestBodyError
+      sendJson(res, invalid && error.code === 'body-too-large' ? 413 : 400, {
+        error: invalid ? error.code : 'invalid-request',
+        message: String(error?.message ?? error),
+      })
+      return
+    }
+
+    const sessionId = body?.sessionId
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      sendJson(res, 400, { error: 'missing-session-id' })
+      return
+    }
+    if (!isValidSessionId(sessionId)) {
+      sendJson(res, 400, { error: 'invalid-session-id' })
+      return
+    }
+
+    const op = body?.op
+    if (op !== 'add' && op !== 'remove') {
+      sendJson(res, 404, { error: 'unknown-op' })
+      return
+    }
+
+    try {
+      if (op === 'add') {
+        if (!isValidHighlight(body.highlight)) {
+          sendJson(res, 400, { error: 'invalid-highlight' })
+          return
+        }
+        const state = await store.addHighlight(sessionId, body.highlight)
+        sendJson(res, 200, { highlights: state.highlights })
+        return
+      }
+      const id = body?.highlight?.id
+      if (typeof id !== 'string' || id.length === 0) {
+        sendJson(res, 400, { error: 'invalid-highlight' })
+        return
+      }
+      const state = await store.removeHighlight(sessionId, id)
+      sendJson(res, 200, { highlights: state.highlights })
+    } catch (error) {
+      sendJson(res, 500, { error: 'store-unavailable', message: String(error?.message ?? error) })
+    }
+  }
+
   // A child fiber declaring the dependency is what exposes `scope.webServer`.
   ctx.inject(['webServer'], (scope) => {
     scope.effect(
@@ -254,6 +361,14 @@ export function apply(ctx) {
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: ASK_PATH, handler: handleAsk }),
       'dsh-clipchat: ask route',
+    )
+    scope.effect(
+      () => scope.webServer.register({ kind: 'exact', path: SESSION_PATH, handler: handleSession }),
+      'dsh-clipchat: session route',
+    )
+    scope.effect(
+      () => scope.webServer.register({ kind: 'exact', path: HIGHLIGHT_PATH, handler: handleHighlight }),
+      'dsh-clipchat: highlight route',
     )
   })
 }
