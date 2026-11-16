@@ -1,8 +1,9 @@
 /**
  * dsh-clipchat host half.
  *
- * Four routes, all behind the host's own request fence:
+ * Five routes, all behind the host's own request fence:
  *   GET  /dsh-clipchat/status    → { ok, guard, model } for development self-checks
+ *   GET  /dsh-clipchat/models    → { models, current } for the per-highlight picker
  *   POST /dsh-clipchat/ask       → SSE answer for one in-card question
  *   GET  /dsh-clipchat/session   → { highlights, records } of one conversation
  *   POST /dsh-clipchat/highlight → { highlights } after an add or remove
@@ -23,7 +24,8 @@ import { buildContext, ContextError, LIMITS } from './lib/context.js'
 import {
   RequestBodyError, openSse, readJsonBody, sameOriginRejection, sendJson, writeFrame,
 } from './lib/http.js'
-import { resolveModel } from './lib/model.js'
+import { normalizeModelRoute, resolveModel } from './lib/model.js'
+import { isModelAvailable, listModelChoices } from './lib/models.js'
 import { createStore, isValidHighlight, isValidSessionId } from './lib/store.js'
 
 const PREFIX = '/dsh-clipchat'
@@ -31,6 +33,7 @@ const STATUS_PATH = `${PREFIX}/status`
 const ASK_PATH = `${PREFIX}/ask`
 const SESSION_PATH = `${PREFIX}/session`
 const HIGHLIGHT_PATH = `${PREFIX}/highlight`
+const MODELS_PATH = `${PREFIX}/models`
 const ANSWER_MAX_TOKENS = 2048
 
 /**
@@ -249,10 +252,19 @@ export function apply(ctx, options = {}) {
       return
     }
 
-    const model = resolveModel(ctx, {
-      sessionId: typeof body?.sessionId === 'string' ? body.sessionId : undefined,
-      model: body?.model,
-    })
+    let model
+    if (body?.model !== undefined && body?.model !== null) {
+      const explicit = normalizeModelRoute(body.model)
+      if (explicit === null || !(await isModelAvailable(ctx, explicit))) {
+        sendJson(res, 400, { error: 'invalid-model' })
+        return
+      }
+      model = explicit
+    } else {
+      model = resolveModel(ctx, {
+        sessionId: typeof body?.sessionId === 'string' ? body.sessionId : undefined,
+      })
+    }
     if (model === undefined) {
       sendJson(res, 503, { error: 'no-model' })
       return
@@ -358,6 +370,28 @@ export function apply(ctx, options = {}) {
     }
   }
 
+  /** `GET /dsh-clipchat/models`: picker catalog plus the session's current route. */
+  const handleModels = async (req, res) => {
+    if (guard(req, res)) return
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+    const sessionId = sessionIdOf(req)
+    if (sessionId !== null && sessionId.length > 0 && !isValidSessionId(sessionId)) {
+      sendJson(res, 400, { error: 'invalid-session-id' })
+      return
+    }
+    try {
+      const { models, current } = await listModelChoices(ctx, {
+        sessionId: sessionId ?? undefined,
+      })
+      sendJson(res, 200, { models, current })
+    } catch (error) {
+      sendJson(res, 500, { error: 'models-unavailable', message: String(error?.message ?? error) })
+    }
+  }
+
   /** `GET /dsh-clipchat/session`: persisted highlights and records of one conversation. */
   const handleSession = async (req, res) => {
     if (guard(req, res)) return
@@ -458,6 +492,10 @@ export function apply(ctx, options = {}) {
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: HIGHLIGHT_PATH, handler: handleHighlight }),
       'dsh-clipchat: highlight route',
+    )
+    scope.effect(
+      () => scope.webServer.register({ kind: 'exact', path: MODELS_PATH, handler: handleModels }),
+      'dsh-clipchat: models route',
     )
   })
 }
