@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "滑词对话",
+    "description": "选中回复中的一段文字，就地提问、连续追问，并把重点留在原文上。",
+    "detail": "docs/DETAIL.md"
+  }
+}
