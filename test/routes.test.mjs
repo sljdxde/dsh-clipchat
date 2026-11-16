@@ -40,9 +40,10 @@ class FakeResponse extends EventEmitter {
 }
 
 /** A request double: emits a JSON body asynchronously, like a socket would. */
-function makeRequest({ method = 'POST', headers = {}, body } = {}) {
+function makeRequest({ method = 'POST', url, headers = {}, body } = {}) {
   const req = new EventEmitter()
   req.method = method
+  req.url = url
   req.headers = headers
   req.destroyed = false
   req.destroy = () => { req.destroyed = true }
@@ -523,4 +524,198 @@ test('never writes to the session store or calls tools', async () => {
   assert.equal(headerCalls, 1)
   assert.equal(llm.calls.length, 1)
   assert.equal(llm.calls[0].messages.some((message) => message.role === 'tool'), false)
+})
+
+const MODELS_PATH = '/dsh-clipchat/models'
+
+/** An llm double that also advertises a model catalog. */
+function catalogLlm(catalog, script = [], calls = []) {
+  const base = scriptedLlm(script, calls)
+  return {
+    ...base,
+    listProviders: () => Object.keys(catalog).map((id) => ({ id, name: id.toUpperCase() })),
+    async listModels(provider) {
+      const entries = catalog[provider]
+      if (entries instanceof Error) throw entries
+      return (entries ?? []).map((id) => ({ provider, id, name: id.toUpperCase() }))
+    },
+  }
+}
+
+test('GET models lists the provider catalog and the session route behind the guard', async () => {
+  const llm = catalogLlm({ alpha: ['a1', 'a2'], beta: ['b1'] })
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'alpha', model: 'a2' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const handler = routes.get(MODELS_PATH)
+  assert.equal(typeof handler, 'function', 'the models route is registered')
+
+  const res = await call(handler, makeRequest({
+    method: 'GET',
+    url: `${MODELS_PATH}?sessionId=session-1`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(JSON.parse(res.raw), {
+    models: [
+      { provider: 'alpha', model: 'a1', name: 'A1' },
+      { provider: 'alpha', model: 'a2', name: 'A2' },
+      { provider: 'beta', model: 'b1', name: 'B1' },
+    ],
+    current: { provider: 'alpha', model: 'a2' },
+  })
+})
+
+test('GET models falls back to the configured default when listing fails', async () => {
+  const llm = {
+    listProviders() { throw new Error('no registry') },
+  }
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'deepseek', model: 'chat' },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(MODELS_PATH), makeRequest({
+    method: 'GET',
+    url: MODELS_PATH,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(JSON.parse(res.raw), {
+    models: [{ provider: 'deepseek', model: 'chat', name: 'chat' }],
+    current: { provider: 'deepseek', model: 'chat' },
+  })
+})
+
+test('GET models honours the guard and rejects non-read methods', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => 401 } })
+  apply(ctx)
+
+  const guarded = await call(routes.get(MODELS_PATH), makeRequest({
+    method: 'GET',
+    url: MODELS_PATH,
+  }))
+  assert.equal(guarded.status, 401)
+  assert.equal(JSON.parse(guarded.raw).error, 'unauthorized')
+
+  const { ctx: openCtx, routes: openRoutes } = makeContext({
+    connection: { requestRejection: () => undefined },
+  })
+  apply(openCtx)
+  const wrongMethod = await call(openRoutes.get(MODELS_PATH), makeRequest({
+    method: 'POST',
+    url: MODELS_PATH,
+    headers: { host: 'h' },
+  }))
+  assert.equal(wrongMethod.status, 405)
+})
+
+test('an explicit ask model wins over the session chain', async () => {
+  const llm = catalogLlm({ alpha: ['a1', 'a2'] }, [
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'alpha', model: 'a1' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: { ...baseBody, model: { provider: 'alpha', model: 'a2' } },
+  }))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(framesOf(res)[0], { type: 'meta', provider: 'alpha', model: 'a2' })
+  assert.equal(llm.calls[0].provider, 'alpha')
+  assert.equal(llm.calls[0].model, 'a2')
+})
+
+test('an explicit ask model may carry a reasoning effort', async () => {
+  const llm = catalogLlm({ alpha: ['a1'] }, [
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: { ...baseBody, model: { provider: 'alpha', model: 'a1', reasoningEffort: 'high' } },
+  }))
+
+  assert.equal(res.status, 200)
+  assert.equal(llm.calls[0].reasoningEffort, 'high')
+})
+
+test('rejects an ask whose explicit model is not in the catalog', async () => {
+  const llm = catalogLlm({ alpha: ['a1'] }, [
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'alpha', model: 'a1' },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: { ...baseBody, model: { provider: 'alpha', model: 'gone' } },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.deepEqual(JSON.parse(res.raw), { error: 'invalid-model' })
+  assert.equal(llm.calls.length, 0, 'no model call happens for an invalid choice')
+})
+
+test('rejects an ask with a malformed model object', async () => {
+  const llm = catalogLlm({ alpha: ['a1'] })
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'alpha', model: 'a1' },
+    llm,
+  })
+  apply(ctx)
+
+  for (const model of [{ provider: 'alpha' }, { model: 'a1' }, { provider: '', model: '' }, 'alpha']) {
+    const res = await call(routes.get(ASK_PATH), makeRequest({
+      headers: { host: 'h' },
+      body: { ...baseBody, model },
+    }))
+    assert.equal(res.status, 400)
+    assert.deepEqual(JSON.parse(res.raw), { error: 'invalid-model' })
+  }
+  assert.equal(llm.calls.length, 0)
+})
+
+test('an omitted ask model still follows the session header chain', async () => {
+  const llm = catalogLlm({ alpha: ['a1'] }, [
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'alpha', model: 'a1' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: baseBody,
+  }))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(framesOf(res)[0], { type: 'meta', provider: 'alpha', model: 'a1' })
 })

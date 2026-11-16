@@ -157,3 +157,51 @@ test('recent turns are empty when the selected node is unknown', () => {
   assert.deepEqual(test_.recentTurnsOf(makeSnapshot(), 'missing', 3), [])
   assert.deepEqual(test_.recentTurnsOf(undefined, 'missing', 3), [])
 })
+
+test('model choices put follow first and dedupe listed entries', () => {
+  const choices = test_.modelChoicesOf([
+    { provider: 'p', model: 'm1', name: 'M1' },
+    { provider: 'p', model: 'm1', name: 'M1 duplicate' },
+    { provider: 'q', model: 'm2', name: 'M2' },
+    { provider: '', model: 'invalid' },
+  ])
+
+  assert.deepEqual(choices.map((choice) => choice.key), ['follow', 'p\u0000m1', 'q\u0000m2'])
+  assert.deepEqual(choices[0], { key: 'follow', provider: null, model: null, name: null })
+  assert.deepEqual(choices[1], { key: 'p\u0000m1', provider: 'p', model: 'm1', name: 'M1' })
+})
+
+test('a stored or selected model stays visible when the catalog omits it', () => {
+  const selected = { provider: 'q', model: 'stored', reasoningEffort: 'high' }
+  const choices = test_.modelChoicesOf([{ provider: 'p', model: 'm1', name: 'M1' }], selected)
+
+  assert.deepEqual(choices.at(-1), {
+    key: 'q\u0000stored',
+    provider: 'q',
+    model: 'stored',
+    name: 'stored',
+  })
+  assert.equal(test_.modelKeyOf(selected), 'q\u0000stored')
+  assert.equal(test_.modelKeyOf(null), 'follow')
+  assert.equal(test_.modelKeyOf({ provider: '', model: 'bad' }), 'follow')
+})
+
+test('a highlight captures the model chosen when it was created', () => {
+  const anchor = {
+    nodeKey: '9:assistant-step1:1',
+    sourceIndex: 0,
+    spans: [{ blockIndex: 0, start: 0, end: 7 }],
+    text: 'passage',
+  }
+
+  const id = test_.addHighlight(anchor, { provider: 'p', model: 'm', reasoningEffort: 'high' })
+  assert.equal(typeof id, 'string')
+  assert.deepEqual(test_.storedModelOf(anchor.nodeKey, anchor.text), {
+    provider: 'p',
+    model: 'm',
+    reasoningEffort: 'high',
+  })
+
+  assert.equal(test_.addHighlight(anchor, null), null, 'the same passage is not duplicated')
+  assert.equal(test_.storedModelOf('missing', 'none'), null)
+})
