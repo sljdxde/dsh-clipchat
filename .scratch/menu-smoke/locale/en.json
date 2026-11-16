@@ -1,7 +1,0 @@
-{
-  "meta": {
-    "title": "Clipchat smoke",
-    "description": "Ticket 09 minimal check: select assistant text to open a popover, inspect slot props, and run two direct model turns.",
-    "detail": "docs/DETAIL.md"
-  }
-}

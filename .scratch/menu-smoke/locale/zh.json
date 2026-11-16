@@ -1,7 +1,0 @@
-{
-  "meta": {
-    "title": "滑词对话冒烟",
-    "description": "Ticket 09 的最小验证：选中 assistant 正文弹出浮窗，检查 slot props，并连续两轮直连模型。",
-    "detail": "docs/DETAIL.md"
-  }
-}

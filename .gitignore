@@ -1,3 +1,6 @@
 node_modules/
 .DS_Store
 *.log
+
+# Local planning artifacts (wayfinder map, tickets, prototypes, research, archive).
+.scratch/

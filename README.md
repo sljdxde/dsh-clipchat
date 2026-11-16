@@ -1,0 +1,122 @@
+# dsh-clipchat
+
+在 DSH 的回复里划词就地提问：选中一段文字，浮层出现「引用文本 / 问这段」，点开卡片就能追问，答案不出现在主线消息流里，重点还能像划线一样留在原文上。
+
+## 功能
+
+- **划词即问**：只对 assistant 正文生效；用户消息、思考区、工具卡片不出现入口。
+- **就近卡片**：选段栏、4 个快捷提问（解释这段 / 翻译 / 找问题 / 举个例子）、问答线程、流式回答、停止生成、输入输出 token。
+- **连续追问**：同一张卡片里继续问，历史随请求一起带走。
+- **模型选择**：默认跟随主会话，也可为某段选段固定一个模型，选择随高亮保存。
+- **高亮**：首次提问自动提交，也可手动点「高亮这段」；原文下方显示绿色底线，随会话持久化，点击可回看当时的问答。
+- **留痕**：显式保存问答，卡片内列表可查看、删除；支持跨会话搜索全部留痕。
+- **带回主线**：把选段引用 + 不超过 200 字的问答摘要插入主输入框，不自动发送。
+- **不污染主线**：不写 session、不建隐藏会话、不声明工具、不调用工具。
+
+## 环境要求
+
+- DSH 0.2.2-rc.3 或同系列版本（依赖其 `conversation.chat.text-interaction` 插槽与 `llm.stream`）。
+- Node.js >= 20（仅用于跑测试与本地检查；插件本身没有运行时依赖，也没有构建步骤）。
+
+## 安装
+
+### 从本地目录安装（开发期）
+
+1. 确认检出路径里没有空格。若路径含空格（DSH 的安装器会裁掉尾部空格），先建一个干净软链：
+
+   ```sh
+   sh scripts/dev-link.sh
+   # 输出 /tmp/dsh-clipchat-dev -> <你的检出目录>
+   ```
+
+2. 在 DSH 的插件面板里选择本地目录安装，目标填脚本打印的路径。
+3. 刷新页面。`client.js` 改动刷新即生效；`index.js` 与 `lib/` 改动需要禁用/启用该插件（或重启 dsh）才会重新注册路由。
+
+## 使用
+
+1. 在 assistant 回复里选中一段文字。
+2. 浮层出现「引用文本」和「问这段」；点「问这段」展开卡片，输入框自动聚焦。
+3. 直接提问，或点一个快捷提问；回答流式显示，底部显示本次 token。
+4. 需要保留时点「留痕」；想把结论带回主线时点「带回主线」。
+5. 点空白处、按 Esc、点 × 都能关闭卡片；未留痕的问答直接丢弃。
+
+## 开发
+
+```sh
+npm run check   # 语法检查 + 全量测试（无需安装依赖）
+npm test        # 只跑测试
+```
+
+`npm run check` 也会由 `.githooks/pre-commit` 在提交时执行。每个克隆启用一次：
+
+```sh
+git config core.hooksPath .githooks
+```
+
+## 目录结构
+
+```
+index.js          host 半边：webServer 路由、请求守卫、模型解析、存储装配
+client.js         browser 半边：包装 quote 插槽、菜单/卡片/线程、SSE、高亮 overlay、留痕
+lib/context.js    上下文拼装与截断（system + <context> + 历史 + 本次问题）
+lib/http.js       JSON 请求体读取、SSE 写入、同源守卫
+lib/model.js      模型路由规范化与会话模型解析
+lib/models.js     模型目录汇总与可用性校验
+lib/search.js     跨会话留痕搜索（纯函数）
+lib/store.js      每会话 JSON 存储：原子写、上限、TTL、孤儿清理
+locale/           中英文案
+test/             node:test 套件，共享夹具在 test/helpers/
+scripts/          检查脚本与本地开发链接
+```
+
+`client.js` 是手写单文件 bundle，没有构建步骤；浏览器侧不能 import `lib/*.js`，因此少量形状校验（如模型路由）在两半各保留一份。
+
+## 数据与存储
+
+- 位置：`DSH_HOME/clipchat/<sessionId>.json`（回退到 `~/.dsh/clipchat`）。目录 0700、文件 0600、临时文件 + rename 原子写，同一会话的写操作串行化。
+- 结构：`{ version: 1, sessionId, updatedAt, highlights: [], records: [] }`。
+- 上限：每会话 200 条高亮、500 条留痕，超出丢最旧；单文件超过 1 MB 时先丢最旧留痕，高亮不丢。
+- 生命周期：7 天无访问自动清理；归档会话保留；永久删除会话后由孤儿清理删除。无法解析的文件保持原样。
+- 跨会话搜索只读：不会因为查询刷新 `updatedAt`，也不会给休眠会话续期。
+
+## HTTP 接口
+
+所有路由先过宿主自己的 `requestRejection` 守卫。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/dsh-clipchat/status` | 开发自检：守卫类型与当前模型 |
+| GET | `/dsh-clipchat/models?sessionId=` | 模型目录与会话当前路由 |
+| POST | `/dsh-clipchat/ask` | SSE 回答，帧为 `meta` / `delta` / `usage` / `done` / `error` |
+| GET | `/dsh-clipchat/session?sessionId=` | 该会话的高亮与留痕 |
+| GET | `/dsh-clipchat/search?q=&limit=` | 跨会话留痕搜索（`limit` 默认 20、上限 50） |
+| POST | `/dsh-clipchat/highlight` | 高亮增删（`op: add/remove`） |
+| POST | `/dsh-clipchat/record` | 留痕增删（`op: add/remove`） |
+
+## 上下文拼装
+
+一次提问只带这些内容，顺序固定以利 KV cache：
+
+```
+system → <context> → 历史问答 → 本次问题
+```
+
+`<context>` 内含 `<message>`（选段所在 assistant step 的可见文本）、`<selection>`（选段原文）、`<recent>`（选中轮之前最近 3 个已完成 turn）。
+
+预算：选段 2000 字（超出直接拒绝，不截断）、消息 8000 字、每个 recent 轮次 1500 字、历史最多 12 条消息、总输入约 15000 字。超预算时依次丢最旧历史、最旧 recent 轮次、缩小消息摘录；选段永不裁剪。
+
+## 测试
+
+```sh
+npm run check
+```
+
+覆盖：路由注册与销毁、守卫、模型解析、上下文拼装与截断、SSE 帧与中断、存储 schema/上限/TTL/孤儿清理/并发写、锚点重锚、搜索与截断、客户端卡片交互（快捷提问、自动高亮、空选段禁用）。
+
+## 已知限制
+
+- 高亮 overlay 依赖聊天列的 `[data-chat-flow]` 结构，上游改版可能需要跟着调整。
+- 多 span 跨块选区只在单块单 span 时做前缀回退，多 span 依赖精确偏移。
+- 从高亮打开卡片需要把选区落到该高亮上（宿主 surface 只能由选区唤起），不抢焦点但仍会改变选区。
+- 卡片打开期间若聊天区被虚拟化替换掉选区节点，宿主可能关闭浮窗。
+- 与隐藏原生引用的插件（如 dsh-sidenote）同时安装时，「问这段」会随引用 surface 一起隐藏。
