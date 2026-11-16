@@ -44,6 +44,7 @@ window.__ModuleLoader__.load({
       recorded: '已留痕',
       records: '留痕',
       backToMain: '带回主线',
+      previousQa: '此前问答',
       inserted: '已插入',
       insertFailed: '无法插入，请手动复制',
       currentSelection: '当前选段',
@@ -81,6 +82,7 @@ window.__ModuleLoader__.load({
       recorded: 'Kept',
       records: 'Kept',
       backToMain: 'Send to main',
+      previousQa: 'Earlier Q&A',
       inserted: 'Inserted',
       insertFailed: 'Could not insert. Copy manually.',
       currentSelection: 'This passage',
@@ -124,7 +126,7 @@ window.__ModuleLoader__.load({
 .clipchat-card__record-del:hover{opacity:1}
 .clipchat-card__records-empty{opacity:.6;font-size:11px}
 .clipchat-layer{position:absolute;inset:0;pointer-events:none;z-index:5}
-.clipchat-layer__rect{position:absolute;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 22%, transparent);border-radius:2px;pointer-events:none}
+.clipchat-layer__rect{position:absolute;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 22%, transparent);border-radius:2px;pointer-events:auto;cursor:pointer}
 `
     let styleTag
 
@@ -249,6 +251,7 @@ window.__ModuleLoader__.load({
 
     /** Stored highlights keyed by id: `{ id, anchor, createdAt }`. */
     const highlights = new Map()
+    let pendingHighlightId = null
     let nextHighlightId = 1
 
     /** Stored 留痕 records of the loaded session, keyed by id. */
@@ -655,6 +658,38 @@ window.__ModuleLoader__.load({
       return { blockIndex: span.blockIndex, start: index, end: index + text.length }
     }
 
+    /** Newest record for one highlight, falling back to the same selected text. */
+    function recordForHighlight(highlightId, text) {
+      const entries = [...records.values()]
+        .filter((entry) => entry.highlightId === highlightId || entry.selection === text)
+        .sort((left, right) => (left.createdAt ?? 0) - (right.createdAt ?? 0))
+      return entries.length === 0 ? null : entries[entries.length - 1]
+    }
+
+    /** Select one stored highlight and ask the host surface to open on it. */
+    function openHighlight(highlight) {
+      const anchor = highlight?.anchor
+      if (anchor === null || anchor === undefined) return false
+      for (const node of nodesFor(anchor.nodeKey)) {
+        const source = node.querySelectorAll('[data-text-interaction-source]')[anchor.sourceIndex ?? 0]
+        if (source === undefined) continue
+        const blocks = blocksOf(source)
+        const span = Array.isArray(anchor.spans) ? anchor.spans[0] : undefined
+        const block = span === undefined ? undefined : blocks[span.blockIndex]
+        if (block === undefined) continue
+        const range = rangeForSpan(block, span.start, span.end)
+        if (range === null) continue
+        const selection = document.getSelection()
+        if (selection === null) return false
+        selection.removeAllRanges()
+        selection.addRange(range)
+        pendingHighlightId = highlight.id
+        document.dispatchEvent(new Event('selectionchange'))
+        return true
+      }
+      return false
+    }
+
     /** Redraw every highlight as absolutely positioned rects over the chat. */
     function renderAll() {
       if (typeof document === 'undefined' || document.body === null || document.body === undefined
@@ -880,7 +915,8 @@ window.__ModuleLoader__.load({
 
     function ClipMenu(props) {
       const { Original, dismiss, readText, translate } = props
-      const [expanded, setExpanded] = React.useState(false)
+      const [requestedHighlight] = React.useState(() => { const id = pendingHighlightId; pendingHighlightId = null; return id })
+      const [expanded, setExpanded] = React.useState(requestedHighlight !== null)
       const [nodeKey] = React.useState(nodeKeyOfSelection)
       const [anchor] = React.useState(anchorFromSelection)
       const [selection] = React.useState(() => {
@@ -905,17 +941,20 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h(ClipCard, Object.assign({}, props, { selection, nodeKey, anchor, dismiss, translate }))
+      return h(ClipCard, Object.assign({}, props, { selection, nodeKey, anchor, dismiss, translate, initialHighlightId: requestedHighlight }))
     }
 
     function ClipCard(props) {
-      const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat, inputActions } = props
+      const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat, inputActions, initialHighlightId } = props
       const textareaRef = React.useRef(null)
       const controllerRef = React.useRef(null)
       const requestIdRef = React.useRef(0)
       const aliveRef = React.useRef(true)
-      const [draft, setDraft] = React.useState('')
-      const [answer, setAnswer] = React.useState('')
+      const [loadedRecord] = React.useState(() => initialHighlightId === null || initialHighlightId === undefined
+        ? null
+        : recordForHighlight(initialHighlightId, selection))
+      const [draft, setDraft] = React.useState(() => loadedRecord?.question ?? '')
+      const [answer, setAnswer] = React.useState(() => loadedRecord?.answer ?? '')
       const [tokens, setTokens] = React.useState(null)
       const [error, setError] = React.useState('')
       const [streaming, setStreaming] = React.useState(false)
@@ -937,7 +976,7 @@ window.__ModuleLoader__.load({
       const locations = useChatSlice((snapshot) => snapshot?.locations)
 
       React.useEffect(() => {
-        if (textareaRef.current !== null) textareaRef.current.focus()
+        if (initialHighlightId === null || initialHighlightId === undefined) textareaRef.current?.focus()
       }, [])
 
       // One catalog read per card open; a failed read leaves follow plus the
@@ -1212,6 +1251,8 @@ window.__ModuleLoader__.load({
           }, '×')),
         h('div', { className: 'clipchat-card__label' }, translate('preview')),
         h('div', { className: 'clipchat-card__selection' }, selection.length > 0 ? selection : translate('empty')),
+        loadedRecord === null ? null : h('div', { className: 'clipchat-card__label' }, translate('previousQa')),
+        loadedRecord === null ? null : h('div', { className: 'clipchat-card__record-q' }, loadedRecord.question),
         h('div', { className: 'clipchat-card__answer' },
           answer.length > 0 ? answer : streaming ? translate('thinking') : ''),
         tokenLine === null ? null : h('div', { className: 'clipchat-card__tokens' }, tokenLine),
@@ -1313,14 +1354,29 @@ window.__ModuleLoader__.load({
         renderAll()
         void maybeLoadSession()
         const onResize = () => scheduleRender()
+        const onHighlightClick = (event) => {
+          const target = event.target instanceof Element ? event.target.closest('.clipchat-layer__rect') : null
+          if (target === null) return
+          const entry = highlights.get(target.getAttribute('data-clipchat-id'))
+          if (entry === undefined) return
+          event.preventDefault()
+          event.stopPropagation()
+          openHighlight(entry)
+        }
         if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
           window.addEventListener('resize', onResize)
+        }
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          document.addEventListener('click', onHighlightClick, true)
         }
         return () => {
           if (observer !== null) observer.disconnect()
           observer = null
           if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
             window.removeEventListener('resize', onResize)
+          }
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('click', onHighlightClick, true)
           }
           if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
             for (const layer of document.querySelectorAll('.clipchat-layer')) layer.remove()
