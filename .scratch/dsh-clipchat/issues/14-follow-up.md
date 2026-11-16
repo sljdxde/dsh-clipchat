@@ -4,9 +4,10 @@
 
 **Blocked by:** 13（单问 + 默认上下文 + 流式）
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 第一问完成后追问，第二轮流式正常，无 TypeError
-- [ ] host 测试断言 assistant 历史由 `createAssistantMessage` 构造
-- [ ] 第二问请求包含第一问的 user + assistant 文本
-- [ ] 关闭卡片后追问历史丢弃；刷新不恢复（浮窗即弃）
+- [x] 第一问完成后追问，第二轮流式正常，无 TypeError
+- [x] host 测试断言 assistant 历史由 `createAssistantMessage` 构造
+- [x] 第二问请求包含第一问的 user + assistant 文本
+- [x] 关闭卡片后追问历史丢弃；刷新不恢复（浮窗即弃）
+（2026-11-16 实测：第三问 body.history=4，回答能复述前两问；13 的 history 路径已覆盖本票。）
