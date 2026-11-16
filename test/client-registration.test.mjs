@@ -100,3 +100,12 @@ test('splits a span across text nodes without losing offsets', async () => {
   ])
   assert.deepEqual(plugin.__test.segmentsForSpan([4], 1, 9), [{ index: 0, from: 1, to: 4 }])
 })
+
+test('re-anchors a span when block text shifted, else gives up', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const span = { blockIndex: 2, start: 4, end: 10 }
+  assert.deepEqual(plugin.__test.resolvedSpanAt('0123abcdef', span, 'abcdef'), span)
+  assert.deepEqual(plugin.__test.resolvedSpanAt('前缀--0123abcdef', span, 'abcdef'), { blockIndex: 2, start: 8, end: 14 })
+  assert.equal(plugin.__test.resolvedSpanAt('完全不同的文字', span, 'abcdef'), null)
+})

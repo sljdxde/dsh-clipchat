@@ -401,6 +401,15 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Re-anchor one span when the block text changed; returns null when it cannot. */
+    function resolvedSpanAt(blockText, span, text) {
+      if (blockText.slice(span.start, span.end) === text) return span
+      let index = blockText.indexOf(text)
+      if (index < 0) index = blockText.indexOf(text.slice(0, 24))
+      if (index < 0) return null
+      return { blockIndex: span.blockIndex, start: index, end: index + text.length }
+    }
+
     /** Redraw every highlight as absolutely positioned rects over the chat. */
     function renderAll() {
       if (typeof document === 'undefined' || document.body === null || document.body === undefined
@@ -424,9 +433,13 @@ window.__ModuleLoader__.load({
           const source = node.querySelectorAll('[data-text-interaction-source]')[sourceIndex]
           if (source === undefined) continue
           const blocks = blocksOf(source)
-          for (const span of spans) {
-            const block = blocks[span.blockIndex]
+          for (const originalSpan of spans) {
+            const block = blocks[originalSpan.blockIndex]
             if (block === undefined) continue
+            const span = spans.length === 1
+              ? resolvedSpanAt(block.textContent, originalSpan, anchor.text)
+              : originalSpan
+            if (span === null) continue
             const range = rangeForSpan(block, span.start, span.end)
             if (range === null) continue
             for (const rect of range.getClientRects()) {
@@ -833,7 +846,6 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'clipchat-actions__btn',
-            disabled: highlighted,
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => {
               if (highlighted) {
@@ -921,6 +933,7 @@ window.__ModuleLoader__.load({
         errorMessageOf,
         segmentsForSpan,
         anchorFromSelection,
+        resolvedSpanAt,
         currentSessionIdOf,
         highlightIdOf,
         hasHighlight,
