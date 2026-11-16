@@ -78,6 +78,43 @@ function sessionIdOf(req) {
 }
 
 /**
+ * Session ids the host currently treats as alive. An archived conversation
+ * keeps its data, so its id belongs to the keep set; an id that cannot be
+ * normalized to a string is ignored.
+ * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
+ * @returns {Set<string> | null} the keep set, or null when the host cannot list
+ *   sessions (the caller must skip the orphan sweep in that case).
+ */
+function liveSessionIdsOf(ctx) {
+  const sessions = ctx.get('sessions')
+  if (typeof sessions?.list !== 'function') return null
+  let listed
+  try {
+    listed = sessions.list()
+  } catch {
+    return null
+  }
+  if (!Array.isArray(listed)) return null
+  const ids = new Set()
+  for (const entry of listed) {
+    const id = typeof entry === 'string' ? entry : entry?.id
+    if (typeof id === 'string' && id.length > 0) ids.add(id)
+  }
+  try {
+    const registry = ctx.get('workspaceRegistry') ?? ctx.get('workspace')
+    const archived = registry?.archivedSessionIds
+    if (Array.isArray(archived)) {
+      for (const id of archived) {
+        if (typeof id === 'string' && id.length > 0) ids.add(id)
+      }
+    }
+  } catch {
+    /* An unavailable registry only narrows the keep set, never widens it. */
+  }
+  return ids
+}
+
+/**
  * Install both routes against a live `webServer`.
  * @param {import('@deepseek-ai/cordis').Context} ctx - plugin context.
  * @param {{ storeRoot?: string }} [options] - test seams; the host passes none.
@@ -86,6 +123,25 @@ export function apply(ctx, options = {}) {
   const store = options.storeRoot === undefined
     ? createStore()
     : createStore({ root: options.storeRoot })
+
+  /**
+   * Best-effort orphan/TTL cleanup. Without a live session list the sweep is
+   * skipped entirely, so an unavailable session service can never look like
+   * "every conversation was deleted"; `store.load` still enforces the TTL.
+   * @returns {Promise<void>} resolves after cleanup, never rejects.
+   */
+  const sweepStore = async () => {
+    try {
+      const liveSessionIds = liveSessionIdsOf(ctx)
+      if (liveSessionIds === null || liveSessionIds.size === 0) return
+      await store.sweep({ liveSessionIds })
+    } catch {
+      /* Cleanup is opportunistic and must not break a request. */
+    }
+  }
+
+  // Once at startup; the session route also sweeps before answering.
+  void sweepStore()
 
   /** @returns {401 | 403 | undefined} the host fence verdict for this request. */
   const reject = (req) => {
@@ -287,6 +343,7 @@ export function apply(ctx, options = {}) {
       return
     }
     try {
+      await sweepStore()
       const state = await store.load(sessionId)
       sendJson(res, 200, { highlights: state.highlights, records: state.records })
     } catch (error) {

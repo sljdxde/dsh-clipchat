@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -65,7 +65,7 @@ function payloadOf(res) {
   return JSON.parse(res.raw)
 }
 
-function makeContext({ connection } = {}) {
+function makeContext({ connection, sessions, workspaceRegistry } = {}) {
   const routes = new Map()
   const disposers = []
   const webServer = {
@@ -84,7 +84,7 @@ function makeContext({ connection } = {}) {
     },
   }
   const ctx = {
-    get: (name) => (name === 'connection' ? connection : undefined),
+    get: (name) => ({ connection, sessions, workspaceRegistry })[name],
     effect(fn) {
       const dispose = fn()
       if (typeof dispose === 'function') disposers.push(dispose)
@@ -322,4 +322,152 @@ test('wrong methods are rejected with 405', async () => {
     url: HIGHLIGHT_PATH,
   }))
   assert.equal(highlightGet.status, 405)
+})
+
+// --- startup and read-time cleanup (ticket 17) ---
+
+const DAY = 24 * 60 * 60 * 1000
+
+async function writeSession(root, sessionId, updatedAt = Date.now()) {
+  await writeFile(join(root, `${sessionId}.json`), JSON.stringify({
+    version: 1,
+    sessionId,
+    updatedAt,
+    highlights: [],
+    records: [],
+  }))
+}
+
+async function listFiles(root) {
+  try {
+    return await readdir(root)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+}
+
+async function waitFor(predicate, timeoutMs = 1000) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assert.fail('condition was not met before the timeout')
+}
+
+test('apply sweeps orphans against sessions.list plus archived ids', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  await writeSession(storeRoot, 'active-1', Date.now() - DAY)
+  await writeSession(storeRoot, 'archived-1', Date.now() - DAY)
+  await writeSession(storeRoot, 'orphan-1')
+  const { ctx } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'active-1' }] },
+    workspaceRegistry: { archivedSessionIds: ['archived-1'] },
+  })
+
+  apply(ctx, { storeRoot })
+
+  await waitFor(async () => (await listFiles(storeRoot)).length === 2)
+  assert.deepEqual((await listFiles(storeRoot)).sort(), ['active-1.json', 'archived-1.json'])
+})
+
+test('GET session sweeps expired and orphaned files before serving', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'active-1' }] },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'active-1', Date.now() - DAY)
+  await writeSession(storeRoot, 'orphan-1')
+  await writeSession(storeRoot, 'stale-1', Date.now() - 8 * DAY)
+  await writeSession(storeRoot, 'stale-live', Date.now() - 8 * DAY)
+
+  const res = await call(routes.get(SESSION_PATH), getSession('active-1'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual((await listFiles(storeRoot)).sort(), ['active-1.json'])
+})
+
+test('cleanup is skipped when sessions.list is unavailable', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('session-a'))
+
+  assert.equal(res.status, 200)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.deepEqual(await listFiles(storeRoot), ['orphan-1.json'])
+})
+
+test('cleanup is skipped when sessions.list returns no ids', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [] },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('session-a'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(await listFiles(storeRoot), ['orphan-1.json'])
+})
+
+test('a throwing sessions.list neither breaks apply nor the session route', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => { throw new Error('session store unavailable') } },
+  })
+  apply(ctx, { storeRoot })
+  await writeSession(storeRoot, 'orphan-1')
+
+  const res = await call(routes.get(SESSION_PATH), getSession('session-a'))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(await listFiles(storeRoot), ['orphan-1.json'])
+})
+
+test('malformed session entries still yield a usable set of string ids', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  await writeSession(storeRoot, 'active-1', Date.now() - DAY)
+  await writeSession(storeRoot, 'orphan-1')
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    // Session ids are branded strings; a mix of shapes must normalize to strings.
+    sessions: { list: () => [{ id: 'active-1' }, null, { id: '' }, {}] },
+  })
+  apply(ctx, { storeRoot })
+
+  await waitFor(async () => (await listFiles(storeRoot)).length === 1)
+  assert.deepEqual(await listFiles(storeRoot), ['active-1.json'])
+
+  const res = await call(routes.get(SESSION_PATH), getSession('active-1'))
+  assert.equal(res.status, 200)
+})
+
+test('a failing cleanup sweep does not turn GET session into a 500', async () => {
+  const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
+  await writeSession(storeRoot, 'orphan-1')
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => [{ id: 'active-1' }] },
+  })
+  apply(ctx, { storeRoot })
+  // The directory is readable but not writable, so deleting the orphan rejects.
+  await chmod(storeRoot, 0o500)
+  try {
+    const res = await call(routes.get(SESSION_PATH), getSession('session-a'))
+    assert.equal(res.status, 200)
+  } finally {
+    await chmod(storeRoot, 0o700)
+  }
 })

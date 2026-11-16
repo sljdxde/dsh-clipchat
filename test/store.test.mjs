@@ -214,3 +214,168 @@ test('session ids that could escape the store directory are rejected', async () 
   await assert.rejects(store.addHighlight('../escape', highlight('h1')), TypeError)
   await assert.rejects(store.removeHighlight('../escape', 'h1'), TypeError)
 })
+
+// --- 7-day TTL and orphan sweep (ticket 17) ---
+
+const DAY = 24 * 60 * 60 * 1000
+const NOW = 1_700_000_000_000
+
+async function writeSession(root, sessionId, updatedAt, extra = {}) {
+  await writeFile(join(root, `${sessionId}.json`), JSON.stringify({
+    version: 1,
+    sessionId,
+    updatedAt,
+    highlights: [],
+    records: [],
+    ...extra,
+  }))
+}
+
+test('a session untouched for more than 7 days is deleted on load', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'session-a', NOW - 8 * DAY, {
+    highlights: [{ id: 'h1', anchor: anchor('stale'), createdAt: NOW - 8 * DAY }],
+  })
+  const store = createStore({ root, now: () => NOW })
+
+  const state = await store.load('session-a')
+
+  assert.deepEqual(state, {
+    version: 1,
+    sessionId: 'session-a',
+    updatedAt: NOW,
+    highlights: [],
+    records: [],
+  })
+  await assert.rejects(readFile(join(root, 'session-a.json'), 'utf8'), { code: 'ENOENT' })
+})
+
+test('a session touched within 7 days survives load and its clock is refreshed', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'session-a', NOW - 6 * DAY, {
+    highlights: [{ id: 'h1', anchor: anchor('fresh'), createdAt: NOW - 6 * DAY }],
+  })
+  const store = createStore({ root, now: () => NOW })
+
+  const state = await store.load('session-a')
+
+  assert.equal(state.updatedAt, NOW)
+  assert.deepEqual(state.highlights.map((entry) => entry.id), ['h1'])
+  assert.equal((await readState(root, 'session-a')).updatedAt, NOW)
+})
+
+test('the TTL boundary is exclusive: exactly 7 days old still loads', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'session-a', NOW - 7 * DAY)
+  const store = createStore({ root, now: () => NOW })
+
+  await store.load('session-a')
+
+  assert.equal((await readState(root, 'session-a')).updatedAt, NOW)
+})
+
+test('sweep deletes files whose session is not in the live set', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'live', NOW)
+  await writeSession(root, 'orphan', NOW)
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['live']) })
+
+  assert.deepEqual(result, { skipped: false, scanned: 2, removed: ['orphan'] })
+  assert.deepEqual(await readdir(root), ['live.json'])
+})
+
+test('sweep keeps active session ids', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'active-1', NOW)
+  await writeSession(root, 'active-2', NOW)
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['active-1', 'active-2']) })
+
+  assert.deepEqual(result.removed, [])
+  assert.deepEqual((await readdir(root)).sort(), ['active-1.json', 'active-2.json'])
+})
+
+test('sweep keeps archived session ids supplied by the caller', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'active-1', NOW)
+  await writeSession(root, 'archived-1', NOW)
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['active-1', 'archived-1']) })
+
+  assert.deepEqual(result.removed, [])
+  assert.deepEqual((await readdir(root)).sort(), ['active-1.json', 'archived-1.json'])
+})
+
+test('sweep deletes expired files even when their session is still live', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'stale', NOW - 8 * DAY)
+  await writeSession(root, 'fresh', NOW - DAY)
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['stale', 'fresh']) })
+
+  assert.deepEqual(result.removed, ['stale'])
+  assert.deepEqual(await readdir(root), ['fresh.json'])
+})
+
+test('sweep removes a corrupt file instead of keeping it', async () => {
+  const root = await makeRoot()
+  await writeFile(join(root, 'broken.json'), '{not json')
+  await writeSession(root, 'live', NOW)
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['broken', 'live']) })
+
+  assert.deepEqual(result.removed, ['broken'])
+  assert.deepEqual(await readdir(root), ['live.json'])
+})
+
+test('sweep removes a structurally invalid state file', async () => {
+  const root = await makeRoot()
+  await writeFile(join(root, 'wrong-version.json'), JSON.stringify({ version: 99, sessionId: 'wrong-version' }))
+  await writeSession(root, 'live', NOW)
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['wrong-version', 'live']) })
+
+  assert.deepEqual(result.removed, ['wrong-version'])
+  assert.deepEqual(await readdir(root), ['live.json'])
+})
+
+test('sweep is skipped entirely when the live set is unavailable or empty', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'orphan', NOW)
+  const store = createStore({ root, now: () => NOW })
+
+  for (const liveSessionIds of [undefined, null, new Set(), [], 'session-a']) {
+    const result = await store.sweep({ liveSessionIds })
+    assert.deepEqual(result, { skipped: true, scanned: 0, removed: [] })
+  }
+  assert.deepEqual(await readdir(root), ['orphan.json'], 'the host could not list sessions, so nothing was deleted')
+})
+
+test('sweep tolerates a store root that does not exist yet', async () => {
+  const root = join(await makeRoot(), 'missing')
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['session-a']) })
+
+  assert.deepEqual(result, { skipped: false, scanned: 0, removed: [] })
+})
+
+test('sweep ignores files that are not clipchat state files', async () => {
+  const root = await makeRoot()
+  await writeSession(root, 'live', NOW)
+  await writeFile(join(root, 'notes.txt'), 'keep me')
+  await writeFile(join(root, '.live.1.0.tmp'), 'temporary')
+  const store = createStore({ root, now: () => NOW })
+
+  const result = await store.sweep({ liveSessionIds: new Set(['live']) })
+
+  assert.deepEqual(result.removed, [])
+  assert.deepEqual((await readdir(root)).sort(), ['.live.1.0.tmp', 'live.json', 'notes.txt'])
+})
