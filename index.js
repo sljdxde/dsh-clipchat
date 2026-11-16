@@ -1,17 +1,18 @@
 /**
  * dsh-clipchat host half.
  *
- * Five routes, all behind the host's own request fence:
+ * Six routes, all behind the host's own request fence:
  *   GET  /dsh-clipchat/status    → { ok, guard, model } for development self-checks
  *   GET  /dsh-clipchat/models    → { models, current } for the per-highlight picker
  *   POST /dsh-clipchat/ask       → SSE answer for one in-card question
  *   GET  /dsh-clipchat/session   → { highlights, records } of one conversation
  *   POST /dsh-clipchat/highlight → { highlights } after an add or remove
+ *   POST /dsh-clipchat/record    → { records } after an add or remove
  *
  * The ask route only calls `llm.stream`: it never writes a session, never
  * creates a hidden one and never declares tools. The client closing the SSE
- * response aborts the upstream call. Highlight state lives in the clipchat
- * store, never in the host session.
+ * response aborts the upstream call. Highlight and record state lives in the
+ * clipchat store, never in the host session.
  *
  * @module dsh-clipchat
  */
@@ -26,13 +27,14 @@ import {
 } from './lib/http.js'
 import { normalizeModelRoute, resolveModel } from './lib/model.js'
 import { isModelAvailable, listModelChoices } from './lib/models.js'
-import { createStore, isValidHighlight, isValidSessionId } from './lib/store.js'
+import { createStore, isValidHighlight, isValidRecord, isValidSessionId } from './lib/store.js'
 
 const PREFIX = '/dsh-clipchat'
 const STATUS_PATH = `${PREFIX}/status`
 const ASK_PATH = `${PREFIX}/ask`
 const SESSION_PATH = `${PREFIX}/session`
 const HIGHLIGHT_PATH = `${PREFIX}/highlight`
+const RECORD_PATH = `${PREFIX}/record`
 const MODELS_PATH = `${PREFIX}/models`
 const ANSWER_MAX_TOKENS = 2048
 
@@ -475,6 +477,64 @@ export function apply(ctx, options = {}) {
     }
   }
 
+  /** `POST /dsh-clipchat/record`: add or remove one 留痕 record, then return the list. */
+  const handleRecord = async (req, res) => {
+    if (guard(req, res)) return
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+
+    let body
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      const invalid = error instanceof RequestBodyError
+      sendJson(res, invalid && error.code === 'body-too-large' ? 413 : 400, {
+        error: invalid ? error.code : 'invalid-request',
+        message: String(error?.message ?? error),
+      })
+      return
+    }
+
+    const sessionId = body?.sessionId
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
+      sendJson(res, 400, { error: 'missing-session-id' })
+      return
+    }
+    if (!isValidSessionId(sessionId)) {
+      sendJson(res, 400, { error: 'invalid-session-id' })
+      return
+    }
+
+    const op = body?.op
+    if (op !== 'add' && op !== 'remove') {
+      sendJson(res, 404, { error: 'unknown-op' })
+      return
+    }
+
+    try {
+      if (op === 'add') {
+        if (!isValidRecord(body.record)) {
+          sendJson(res, 400, { error: 'invalid-record' })
+          return
+        }
+        const state = await store.addRecord(sessionId, body.record)
+        sendJson(res, 200, { records: state.records })
+        return
+      }
+      const id = body?.record?.id
+      if (typeof id !== 'string' || id.length === 0) {
+        sendJson(res, 400, { error: 'invalid-record' })
+        return
+      }
+      const state = await store.removeRecord(sessionId, id)
+      sendJson(res, 200, { records: state.records })
+    } catch (error) {
+      sendJson(res, 500, { error: 'store-unavailable', message: String(error?.message ?? error) })
+    }
+  }
+
   // A child fiber declaring the dependency is what exposes `scope.webServer`.
   ctx.inject(['webServer'], (scope) => {
     scope.effect(
@@ -496,6 +556,10 @@ export function apply(ctx, options = {}) {
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: MODELS_PATH, handler: handleModels }),
       'dsh-clipchat: models route',
+    )
+    scope.effect(
+      () => scope.webServer.register({ kind: 'exact', path: RECORD_PATH, handler: handleRecord }),
+      'dsh-clipchat: record route',
     )
   })
 }
