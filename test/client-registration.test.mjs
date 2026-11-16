@@ -11,6 +11,8 @@ function makeReact() {
   }
 }
 
+let bundleSequence = 0
+
 async function loadBundle() {
   let definition
   const styles = []
@@ -22,7 +24,7 @@ async function loadBundle() {
     },
   }
   const url = new URL('../client.js', import.meta.url)
-  await import(`${url.href}?v=${Date.now()}`)
+  await import(`${url.href}?v=${++bundleSequence}`)
   assert.ok(definition, 'bundle called __ModuleLoader__.load')
   return { definition, styles }
 }
@@ -84,4 +86,17 @@ test('classifies assistant node keys and rejects user keys', async () => {
   assert.equal(plugin.__test.isAssistantNodeKey('14:assistant-step11:3'), true)
   assert.equal(plugin.__test.isAssistantNodeKey('14:user12:0'), false)
   assert.equal(plugin.__test.isAssistantNodeKey(null), false)
+})
+
+test('splits a span across text nodes without losing offsets', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  assert.deepEqual(plugin.__test.segmentsForSpan([10, 10], 2, 15), [
+    { index: 0, from: 2, to: 10 },
+    { index: 1, from: 0, to: 5 },
+  ])
+  assert.deepEqual(plugin.__test.segmentsForSpan([5, 5, 5], 6, 9), [
+    { index: 1, from: 1, to: 4 },
+  ])
+  assert.deepEqual(plugin.__test.segmentsForSpan([4], 1, 9), [{ index: 0, from: 1, to: 4 }])
 })

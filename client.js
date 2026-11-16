@@ -29,6 +29,8 @@ window.__ModuleLoader__.load({
       contextTooLong: '上下文过长，请缩短问题',
       llmUnavailable: '模型服务暂不可用，请稍后重试',
       forbidden: '没有权限或登录已失效，请刷新页面',
+      highlight: '高亮这段',
+      highlighted: '已高亮',
     }
     const en = {
       ask: 'Ask about this',
@@ -51,6 +53,8 @@ window.__ModuleLoader__.load({
       contextTooLong: 'Context is too long. Shorten the question.',
       llmUnavailable: 'The model service is unavailable. Try again later.',
       forbidden: 'Not allowed, or the session expired. Refresh the page.',
+      highlight: 'Highlight',
+      highlighted: 'Highlighted',
     }
 
     const css = `
@@ -73,6 +77,11 @@ window.__ModuleLoader__.load({
 .clipchat-card__tokens{opacity:.6;font-size:11px}
 .clipchat-card__error{color:#d9544d;font-size:12px;white-space:pre-wrap}
 .clipchat-card__hint{opacity:.6;font-size:11px}
+.clipchat-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;padding:5px 9px}
+.clipchat-actions__btn:disabled{opacity:.55;cursor:default}
+.clipchat-layer{position:absolute;inset:0;pointer-events:none;z-index:5}
+.clipchat-layer__rect{position:absolute;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 22%, transparent);border-radius:2px;pointer-events:none}
 `
     let styleTag
 
@@ -100,6 +109,230 @@ window.__ModuleLoader__.load({
     /** Assistant message keys look like `14:assistant-step11:3`; user keys do not. */
     function isAssistantNodeKey(key) {
       return typeof key === 'string' && /(?:^|:)assistant-step/u.test(key)
+    }
+
+    const BLOCK_TAGS = new Set([
+      'P', 'LI', 'PRE', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+      'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'FIGCAPTION', 'DD', 'DT',
+    ])
+
+    const BLOCK_SELECTOR = [...BLOCK_TAGS].join(',')
+
+    /** Leaf text blocks of one text-interaction source (nested lists resolve to li). */
+    function blocksOf(source) {
+      const blocks = [...source.querySelectorAll(BLOCK_SELECTOR)]
+        .filter((element) => element.querySelector(BLOCK_SELECTOR) === null)
+      return blocks.length > 0 ? blocks : [source]
+    }
+
+    /** Character offset of a DOM boundary inside one block's text. */
+    function offsetWithin(block, container, offset) {
+      if (block === container) return 0
+      if (!block.contains(container)) return 0
+      try {
+        const range = document.createRange()
+        range.selectNodeContents(block)
+        range.setEnd(container, offset)
+        return range.toString().length
+      } catch {
+        return 0
+      }
+    }
+
+    /**
+     * Capture the live selection as a highlight anchor.
+     * @returns {{ nodeKey: string, sourceIndex: number, spans: Array<{ blockIndex: number, start: number, end: number }>, text: string } | null} anchor.
+     */
+    function anchorFromSelection() {
+      if (typeof document === 'undefined' || typeof document.getSelection !== 'function') return null
+      const selection = document.getSelection()
+      if (selection === null || selection.rangeCount === 0) return null
+      const range = selection.getRangeAt(0)
+      if (range.collapsed === true) return null
+      const startElement = range.startContainer.nodeType === 1
+        ? range.startContainer
+        : range.startContainer.parentElement
+      if (startElement === null) return null
+      const source = startElement.closest('[data-text-interaction-source]')
+      const nodeElement = startElement.closest('[data-chat-node-key]')
+      if (source === null || nodeElement === null) return null
+      const sources = [...nodeElement.querySelectorAll('[data-text-interaction-source]')]
+      const sourceIndex = sources.indexOf(source)
+      if (sourceIndex < 0) return null
+      const blocks = blocksOf(source)
+      const startBlock = blocks.findIndex((block) => block === range.startContainer || block.contains(range.startContainer))
+      const endBlock = blocks.findIndex((block) => block === range.endContainer || block.contains(range.endContainer))
+      if (startBlock < 0 || endBlock < 0 || endBlock < startBlock) return null
+      const spans = []
+      for (let index = startBlock; index <= endBlock; index += 1) {
+        const start = index === startBlock ? offsetWithin(blocks[index], range.startContainer, range.startOffset) : 0
+        const end = index === endBlock ? offsetWithin(blocks[index], range.endContainer, range.endOffset) : blocks[index].textContent.length
+        if (end > start) spans.push({ blockIndex: index, start, end })
+      }
+      const text = selection.toString().trim()
+      if (text.length === 0 || spans.length === 0) return null
+      return { nodeKey: nodeElement.getAttribute('data-chat-node-key'), sourceIndex, spans, text }
+    }
+
+    /**
+     * Split one span across a flat list of text-node lengths.
+     * @param {number[]} lengths - text-node lengths in order.
+     * @param {number} start - span start offset.
+     * @param {number} end - span end offset.
+     * @returns {Array<{ index: number, from: number, to: number }>} per-node slices.
+     */
+    function segmentsForSpan(lengths, start, end) {
+      const segments = []
+      let offset = 0
+      for (let index = 0; index < lengths.length; index += 1) {
+        const length = lengths[index]
+        const from = Math.max(start - offset, 0)
+        const to = Math.min(end - offset, length)
+        if (to > from) segments.push({ index, from, to })
+        offset += length
+        if (offset >= end) break
+      }
+      return segments
+    }
+
+    /** Stored highlights (memory only in ticket 15). */
+    const highlights = new Map()
+    let nextHighlightId = 1
+    let applying = false
+    let observer = null
+    let observerTimer
+    let observerOptions = { childList: true, subtree: true, characterData: true }
+
+    /** @returns {boolean} whether this exact passage already has a highlight. */
+    function hasHighlight(nodeKey, text) {
+      for (const anchor of highlights.values()) {
+        if (anchor.nodeKey === nodeKey && anchor.text === text) return true
+      }
+      return false
+    }
+
+    /**
+     * Store one highlight and schedule a render.
+     * @param {ReturnType<typeof anchorFromSelection>} anchor - captured anchor.
+     * @returns {string | null} highlight id.
+     */
+    function addHighlight(anchor) {
+      if (anchor === null) return null
+      if (hasHighlight(anchor.nodeKey, anchor.text)) return null
+      const id = `h${nextHighlightId++}`
+      highlights.set(id, Object.assign({ id }, anchor))
+      scheduleRender()
+      return id
+    }
+
+    /** Ensure the overlay layer inside one chat column. */
+    function layerFor(column) {
+      let layer = column.querySelector(':scope > .clipchat-layer')
+      if (layer === null) {
+        layer = document.createElement('div')
+        layer.className = 'clipchat-layer'
+        column.appendChild(layer)
+      }
+      return layer
+    }
+
+    /** Build a DOM range for one block-local span. */
+    function rangeForSpan(block, start, end) {
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+      const nodes = []
+      let total = 0
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        nodes.push({ node, start: total, length: node.data.length })
+        total += node.data.length
+      }
+      if (nodes.length === 0) return null
+      const pointAt = (offset) => {
+        for (const entry of nodes) {
+          if (offset <= entry.start + entry.length) {
+            return { node: entry.node, offset: Math.max(0, offset - entry.start) }
+          }
+        }
+        const last = nodes[nodes.length - 1]
+        return { node: last.node, offset: last.length }
+      }
+      const from = pointAt(start)
+      const to = pointAt(end)
+      try {
+        const range = document.createRange()
+        range.setStart(from.node, from.offset)
+        range.setEnd(to.node, to.offset)
+        return range
+      } catch {
+        return null
+      }
+    }
+
+    /** Redraw every highlight as absolutely positioned rects over the chat. */
+    function renderAll() {
+      if (typeof document === 'undefined' || document.body === null || document.body === undefined
+        || typeof document.querySelector !== 'function') return
+      const column = document.querySelector('[data-chat-flow]')
+      if (column === null) return
+      applying = true
+      if (observer !== null) observer.disconnect()
+      const layer = layerFor(column)
+      layer.textContent = ''
+      const columnRect = column.getBoundingClientRect()
+      const scaleX = column.offsetWidth === 0 ? 1 : columnRect.width / column.offsetWidth
+      const scaleY = column.offsetHeight === 0 ? 1 : columnRect.height / column.offsetHeight
+      for (const [id, anchor] of highlights) {
+        const candidates = document.querySelectorAll(`[data-chat-node-key="${anchor.nodeKey}"]`)
+        for (const node of candidates) {
+          const source = node.querySelectorAll('[data-text-interaction-source]')[anchor.sourceIndex]
+          if (source === undefined) continue
+          const blocks = blocksOf(source)
+          for (const span of anchor.spans) {
+            const block = blocks[span.blockIndex]
+            if (block === undefined) continue
+            const range = rangeForSpan(block, span.start, span.end)
+            if (range === null) continue
+            for (const rect of range.getClientRects()) {
+              if (rect.width <= 0 || rect.height <= 0) continue
+              const mark = document.createElement('div')
+              mark.className = 'clipchat-layer__rect'
+              mark.setAttribute('data-clipchat-id', id)
+              mark.style.left = `${(rect.left - columnRect.left) / scaleX - column.clientLeft + column.scrollLeft}px`
+              mark.style.top = `${(rect.top - columnRect.top) / scaleY - column.clientTop + column.scrollTop}px`
+              mark.style.width = `${rect.width / scaleX}px`
+              mark.style.height = `${rect.height / scaleY}px`
+              layer.appendChild(mark)
+            }
+          }
+          break
+        }
+      }
+      if (observer !== null) observer.observe(document.body, observerOptions)
+      applying = false
+    }
+
+    /** Debounced, observer-driven re-render. */
+    function scheduleRender() {
+      if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return
+      if (observerTimer !== undefined) return
+      observerTimer = window.setTimeout(() => {
+        observerTimer = undefined
+        renderAll()
+      }, 80)
+    }
+
+    /** Start observing chat mutations; safe in non-browser harnesses. */
+    function ensureObserver() {
+      if (typeof MutationObserver !== 'function' || typeof document === 'undefined'
+        || document.body === null || document.body === undefined) return
+      if (observer !== null) return
+      observer = new MutationObserver((records) => {
+        if (applying) return
+        if (records.every((record) => record.target.nodeType === 1
+          && record.target.closest('.clipchat-layer') !== null)) return
+        scheduleRender()
+      })
+      observer.observe(document.body, observerOptions)
     }
 
     /** Visible plain text of one assistant node (text blocks only). */
@@ -234,6 +467,7 @@ window.__ModuleLoader__.load({
       const { Original, dismiss, readText, translate } = props
       const [expanded, setExpanded] = React.useState(false)
       const [nodeKey] = React.useState(nodeKeyOfSelection)
+      const [anchor] = React.useState(anchorFromSelection)
       const [selection] = React.useState(() => {
         try {
           return readText() ?? ''
@@ -256,11 +490,11 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h(ClipCard, Object.assign({}, props, { selection, nodeKey, dismiss, translate }))
+      return h(ClipCard, Object.assign({}, props, { selection, nodeKey, anchor, dismiss, translate }))
     }
 
     function ClipCard(props) {
-      const { selection, nodeKey, dismiss, translate, sessionId, useChat } = props
+      const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat } = props
       const textareaRef = React.useRef(null)
       const controllerRef = React.useRef(null)
       const requestIdRef = React.useRef(0)
@@ -271,6 +505,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('')
       const [streaming, setStreaming] = React.useState(false)
       const [history, setHistory] = React.useState([])
+      const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection))
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
       // shape stable for harnesses without `useChat`.
@@ -455,6 +690,20 @@ window.__ModuleLoader__.load({
             onClick: send,
           }, streaming ? translate('sending') : translate('send')),
         ),
+
+        anchor === null || anchor === undefined ? null : h('div', { className: 'clipchat-actions' },
+          h('button', {
+            type: 'button',
+            className: 'clipchat-actions__btn',
+            disabled: highlighted,
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: () => {
+              if (highlighted) return
+              addHighlight(anchor)
+              setHighlighted(true)
+            },
+          }, highlighted ? translate('highlighted') : translate('highlight')),
+        ),
       )
     }
 
@@ -465,6 +714,24 @@ window.__ModuleLoader__.load({
       }, 'clipchat: styles')
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'clipchat: dictionaries')
       const translate = ctx.locale.bind(NS)
+      ctx.effect(() => {
+        ensureObserver()
+        renderAll()
+        const onResize = () => scheduleRender()
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+          window.addEventListener('resize', onResize)
+        }
+        return () => {
+          if (observer !== null) observer.disconnect()
+          observer = null
+          if (typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+            window.removeEventListener('resize', onResize)
+          }
+          if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+            for (const layer of document.querySelectorAll('.clipchat-layer')) layer.remove()
+          }
+        }
+      }, 'clipchat: highlights')
 
       ctx.effect(() => ctx.slots.inject('conversation.chat.text-interaction', () => {
         const owned = new Set()
@@ -504,6 +771,8 @@ window.__ModuleLoader__.load({
         recentTurnsOf,
         createSseDecoder,
         errorMessageOf,
+        segmentsForSpan,
+        anchorFromSelection,
       },
     }
   },

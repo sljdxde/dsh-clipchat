@@ -164,10 +164,10 @@ DSH 的回复经常很长。用户读到其中某一段想追问时，只能把�
 ### 7. 高亮锚点与渲染
 
 * 锚点 = `nodeKey`（chat node key）+ 若干 `span`（文本块序号 + 块内字符偏移）+ 选段文本（校验用）。M1 一次选区通常产生一个 span，schema 支持多 span。
-* 渲染：在消息 DOM 内用 TreeWalker 定位文本节点，按偏移包 `<mark data-clipchat-id>`；重标前先 unwrap 旧 mark 并 `normalize()`，避免 mark 被反复切碎。
+* 渲染：在聊天列内放一层绝对定位的 overlay（`pointer-events: none`），按锚点建 Range、取 `getClientRects()` 画高亮块；**不改文本节点**，避免宿主 `available()` 的选区校验失效而 dismiss。高亮块随聊天内容一起滚动。
 * 重锚定：先用 `useChat` 的 `nodes.get(key)` 取节点；块文本与锚点文本一致则按偏移标；不一致时用选段文本在该消息内做前缀搜索；仍失败则保留数据、暂不渲染，下次渲染再试。
 * 未加载的分页消息不渲染；消息进入窗口后由渲染钩子补标。
-* 用 `MutationObserver`（100ms 防抖）监听消息区变化并补标；忽略 mark 内部的变化，避免自触发。
+* 用 `MutationObserver`（100ms 防抖）监听消息区变化并重画；窗口 resize 也重画；忽略 overlay 自身的变化，避免自触发。
 * 高亮点击打开卡片并载入对应记录，不抢输入焦点；点击不改变浏览器选区。
 
 ### 8. 卡片交互
