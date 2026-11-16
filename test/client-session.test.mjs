@@ -152,3 +152,196 @@ test('a session switch clears highlights before the new state arrives', async ()
   release({ highlights: [], records: [] })
   await switching
 })
+
+// --- records (ticket 19) ---
+
+function makeRecord(id = 'r1', overrides = {}) {
+  return {
+    id,
+    selection: `passage-${id}`,
+    question: `question-${id}`,
+    answer: `answer-${id}`,
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    usage: { input: 10, output: 20 },
+    createdAt: 111,
+    ...overrides,
+  }
+}
+
+test('buildRecord assembles the persisted record shape', async () => {
+  const test_ = await loadPlugin(makeDocument())
+
+  const entry = test_.buildRecord({
+    id: 'r1',
+    highlightId: 'h1',
+    selection: 'passage',
+    question: 'why?',
+    answer: 'because',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    usage: { input: 3, output: 7 },
+    createdAt: 99,
+  })
+
+  assert.deepEqual(entry, {
+    id: 'r1',
+    highlightId: 'h1',
+    selection: 'passage',
+    question: 'why?',
+    answer: 'because',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    usage: { input: 3, output: 7 },
+    createdAt: 99,
+  })
+})
+
+test('buildRecord generates an id and timestamp when they are absent', async () => {
+  const test_ = await loadPlugin(makeDocument())
+
+  const entry = test_.buildRecord({
+    selection: 'passage',
+    question: 'why?',
+    answer: 'because',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+  })
+
+  assert.equal(typeof entry.id, 'string')
+  assert.ok(entry.id.length > 0)
+  assert.equal(typeof entry.createdAt, 'number')
+  assert.equal('usage' in entry, false)
+  assert.equal('highlightId' in entry, false)
+})
+
+test('buildRecord refuses an incomplete answer, selection or route', async () => {
+  const test_ = await loadPlugin(makeDocument())
+  const valid = {
+    selection: 'passage',
+    question: 'why?',
+    answer: 'because',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+  }
+
+  for (const broken of [
+    null,
+    {},
+    { ...valid, answer: '' },
+    { ...valid, answer: undefined },
+    { ...valid, question: '' },
+    { ...valid, selection: '' },
+    { ...valid, provider: '' },
+    { ...valid, model: undefined },
+    { ...valid, usage: { input: -1, output: 2 } },
+    { ...valid, usage: { input: 1 } },
+    { ...valid, createdAt: 'yesterday' },
+  ]) {
+    assert.equal(test_.buildRecord(broken), null, `should refuse ${JSON.stringify(broken)}`)
+  }
+})
+
+test('recordCount and recordList track the loaded session records', async () => {
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(url)
+    return { ok: true, json: async () => ({ highlights: [], records: [makeRecord('r1'), makeRecord('r2')] }) }
+  }
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+
+  await test_.loadSession('session-a')
+
+  assert.equal(test_.recordCount(), 2)
+  assert.deepEqual(test_.recordList().map((entry) => entry.id), ['r1', 'r2'])
+  assert.equal(calls.length, 1)
+})
+
+test('a session switch clears records before the new state arrives', async () => {
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+  let callCount = 0
+  let release
+  const pending = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async () => {
+    callCount += 1
+    if (callCount === 1) {
+      return { ok: true, json: async () => ({ highlights: [], records: [makeRecord('r1')] }) }
+    }
+    return { ok: true, json: async () => pending }
+  }
+
+  await test_.loadSession('session-a')
+  assert.equal(test_.recordCount(), 1)
+
+  const switching = test_.loadSession('session-b')
+  assert.equal(test_.recordCount(), 0, 'records are cleared immediately')
+
+  release({ highlights: [], records: [makeRecord('r9')] })
+  await switching
+  assert.deepEqual(test_.recordList().map((entry) => entry.id), ['r9'])
+})
+
+test('malformed stored records are ignored on load', async () => {
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      highlights: [],
+      records: [makeRecord('r1'), null, { id: 'broken' }, { ...makeRecord('r2'), answer: '' }],
+    }),
+  })
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+
+  await test_.loadSession('session-a')
+
+  assert.deepEqual(test_.recordList().map((entry) => entry.id), ['r1'])
+})
+
+test('isCurrentSelection tags only records of the current card selection', async () => {
+  const test_ = await loadPlugin(makeDocument())
+
+  assert.equal(test_.isCurrentSelection(makeRecord('r1', { selection: 'passage-r1' }), 'passage-r1'), true)
+  assert.equal(test_.isCurrentSelection(makeRecord('r1', { selection: 'passage-r1' }), 'other'), false)
+  assert.equal(test_.isCurrentSelection(makeRecord('r1', { selection: 'passage-r1' }), ''), false)
+  assert.equal(test_.isCurrentSelection(null, 'passage-r1'), false)
+  assert.equal(test_.isCurrentSelection(undefined, undefined), false)
+})
+
+test('addRecord and removeRecord update memory next to highlights', async () => {
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ highlights: [], records: [] }) })
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+  await test_.loadSession('session-a')
+  const entry = test_.buildRecord({
+    id: 'r1',
+    selection: 'passage',
+    question: 'why?',
+    answer: 'because',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+  })
+
+  assert.equal(test_.addRecord(entry, 'session-a'), 'r1')
+  assert.equal(test_.recordCount(), 1)
+
+  assert.equal(test_.removeRecord('r1', 'session-a'), true)
+  assert.equal(test_.recordCount(), 0)
+  assert.equal(test_.removeRecord('r1', 'session-a'), false)
+})
+
+test('persisting a record posts to the record route and tolerates failure', async () => {
+  const calls = stubFetch([{ records: [makeRecord('r1')] }])
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+  const entry = makeRecord('r1')
+
+  await test_.persistRecord('add', entry, 'session-a')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/dsh-clipchat/record')
+  assert.equal(calls[0].options.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    sessionId: 'session-a',
+    op: 'add',
+    record: entry,
+  })
+
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) })
+  await test_.persistRecord('remove', { id: 'r1' }, 'session-a')
+})

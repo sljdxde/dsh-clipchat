@@ -7,6 +7,7 @@ window.__ModuleLoader__.load({
     const ASK_PATH = '/dsh-clipchat/ask'
     const SESSION_PATH = '/dsh-clipchat/session'
     const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
+    const RECORD_PATH = '/dsh-clipchat/record'
     const MODELS_PATH = '/dsh-clipchat/models'
     const FOLLOW_MODEL = 'follow'
     const HISTORY_LIMIT = 12
@@ -39,6 +40,12 @@ window.__ModuleLoader__.load({
       model: '模型',
       followModel: '跟随主会话',
       invalidModel: '所选模型不可用，请换一个',
+      record: '留痕',
+      recorded: '已留痕',
+      records: '留痕',
+      currentSelection: '当前选段',
+      deleteRecord: '删除',
+      noRecords: '本会话暂无留痕',
     }
     const en = {
       ask: 'Ask about this',
@@ -67,6 +74,12 @@ window.__ModuleLoader__.load({
       model: 'Model',
       followModel: 'Follow main session',
       invalidModel: 'That model is not available. Pick another.',
+      record: 'Keep',
+      recorded: 'Kept',
+      records: 'Kept',
+      currentSelection: 'This passage',
+      deleteRecord: 'Delete',
+      noRecords: 'No kept answers yet',
     }
 
     const css = `
@@ -94,6 +107,16 @@ window.__ModuleLoader__.load({
 .clipchat-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;font:inherit;cursor:pointer;border-radius:8px;padding:5px 9px}
 .clipchat-actions__btn:disabled{opacity:.55;cursor:default}
+.clipchat-card__records{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding-top:6px}
+.clipchat-card__record{border:1px solid var(--dsw-alias-border-l3);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px}
+.clipchat-card__record-head{display:flex;align-items:center;gap:6px}
+.clipchat-card__record-selection{flex:1;min-width:0;opacity:.7;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-card__tag{font-size:10px;border-radius:999px;padding:1px 6px;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 18%, transparent);white-space:nowrap}
+.clipchat-card__record-q,.clipchat-card__record-a{white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;font-size:12px}
+.clipchat-card__record-a{opacity:.75}
+.clipchat-card__record-del{align-self:flex-end;border:none;background:transparent;color:inherit;opacity:.7;font:var(--dsw-font-xs-13);cursor:pointer;padding:0 2px}
+.clipchat-card__record-del:hover{opacity:1}
+.clipchat-card__records-empty{opacity:.6;font-size:11px}
 .clipchat-layer{position:absolute;inset:0;pointer-events:none;z-index:5}
 .clipchat-layer__rect{position:absolute;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 22%, transparent);border-radius:2px;pointer-events:none}
 `
@@ -221,6 +244,10 @@ window.__ModuleLoader__.load({
     /** Stored highlights keyed by id: `{ id, anchor, createdAt }`. */
     const highlights = new Map()
     let nextHighlightId = 1
+
+    /** Stored 留痕 records of the loaded session, keyed by id. */
+    const records = new Map()
+    let nextRecordId = 1
     let loadedSessionId = null
     let loadToken = 0
     let sessionTimer
@@ -339,6 +366,131 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** A client-generated record id; the host stores it verbatim. */
+    function newRecordId() {
+      return `r${Date.now().toString(36)}${(nextRecordId++).toString(36)}`
+    }
+
+    function isRecordText(value) {
+      return typeof value === 'string' && value.trim().length > 0
+    }
+
+    /**
+     * Normalize one usage pair from an SSE frame or the card's token state.
+     * @param {unknown} value - `{ input, output }` or `{ inputTokens, outputTokens }`.
+     * @returns {{ input: number, output: number } | null} usage, or null when unusable.
+     */
+    function normalizeUsage(value) {
+      if (value === null || typeof value !== 'object') return null
+      const pick = (primary, fallback) => Number.isFinite(primary)
+        ? primary
+        : Number.isFinite(fallback) ? fallback : null
+      const input = pick(value.input, value.inputTokens)
+      const output = pick(value.output, value.outputTokens)
+      if (input === null || output === null || input < 0 || output < 0) return null
+      return { input, output }
+    }
+
+    /**
+     * Build one persisted 留痕 record, or null when the answer is incomplete.
+     *
+     * A record is only written when a question, an answer and the answering
+     * route are all known; `usage` and `highlightId` are optional.
+     * @param {object} input - card state captured when the user clicks 留痕.
+     * @returns {object | null} the record, or null when it cannot be stored.
+     */
+    function buildRecord(input) {
+      if (input === null || typeof input !== 'object') return null
+      if (!isRecordText(input.selection) || input.selection.length > 4000) return null
+      if (!isRecordText(input.question) || input.question.length > 20000) return null
+      if (!isRecordText(input.answer) || input.answer.length > 512 * 1024) return null
+      if (!isRecordText(input.provider) || !isRecordText(input.model)) return null
+      if (input.createdAt !== undefined && !Number.isFinite(input.createdAt)) return null
+      const usage = input.usage === undefined ? null : normalizeUsage(input.usage)
+      if (input.usage !== undefined && usage === null) return null
+      const entry = {
+        id: isRecordText(input.id) ? input.id : newRecordId(),
+        selection: input.selection,
+        question: input.question,
+        answer: input.answer,
+        provider: input.provider,
+        model: input.model,
+        createdAt: Number.isFinite(input.createdAt) ? input.createdAt : Date.now(),
+      }
+      if (isRecordText(input.highlightId)) entry.highlightId = input.highlightId
+      if (usage !== null) entry.usage = usage
+      return entry
+    }
+
+    /** @returns {number} how many records the loaded session has. */
+    function recordCount() {
+      return records.size
+    }
+
+    /** @returns {Array<object>} the loaded session's records, oldest first. */
+    function recordList() {
+      return [...records.values()].sort((left, right) => (left.createdAt ?? 0) - (right.createdAt ?? 0))
+    }
+
+    /**
+     * Whether a record belongs to the card's current selection (the 当前选段 tag).
+     * @param {unknown} record - one stored record.
+     * @param {unknown} selection - the card's selection text.
+     * @returns {boolean} whether the tag applies.
+     */
+    function isCurrentSelection(record, selection) {
+      if (record === null || typeof record !== 'object') return false
+      if (typeof selection !== 'string' || selection.length === 0) return false
+      return typeof record.selection === 'string' && record.selection === selection
+    }
+
+    /**
+     * Persist one record add/remove; a failed write keeps the local record.
+     * @param {'add' | 'remove'} op - store operation.
+     * @param {object} payload - the record entry, or `{ id }` for removals.
+     * @param {string} [fallbackSessionId] - card session id when the DOM has none.
+     */
+    async function persistRecord(op, payload, fallbackSessionId) {
+      const sessionId = writeSessionId(fallbackSessionId)
+      if (sessionId === null || typeof fetch !== 'function') return
+      try {
+        const response = await fetch(RECORD_PATH, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId, op, record: payload }),
+        })
+        if (response.ok !== true) throw new Error(`status ${response.status}`)
+      } catch (error) {
+        console.warn('dsh-clipchat: record was not saved', error)
+      }
+    }
+
+    /**
+     * Store one record in memory, then persist it.
+     * @param {object} entry - record built by {@link buildRecord}.
+     * @param {string} [fallbackSessionId] - card session id when the DOM has none.
+     * @returns {string | null} record id, or null when the entry is unusable.
+     */
+    function addRecord(entry, fallbackSessionId) {
+      if (entry === null || typeof entry !== 'object') return null
+      if (!isRecordText(entry.id)) return null
+      records.set(entry.id, entry)
+      void persistRecord('add', entry, fallbackSessionId)
+      return entry.id
+    }
+
+    /**
+     * Drop one record from memory and persist the removal.
+     * @param {string} id - record id.
+     * @param {string} [fallbackSessionId] - card session id when the DOM has none.
+     * @returns {boolean} whether it existed.
+     */
+    function removeRecord(id, fallbackSessionId) {
+      const removed = records.delete(id)
+      if (removed) void persistRecord('remove', { id }, fallbackSessionId)
+      return removed
+    }
+
     /**
      * Store one highlight locally, then persist it.
      * @param {ReturnType<typeof anchorFromSelection>} anchor - captured anchor.
@@ -381,6 +533,7 @@ window.__ModuleLoader__.load({
     async function loadSession(sessionId) {
       const token = ++loadToken
       highlights.clear()
+      records.clear()
       loadedSessionId = sessionId ?? null
       renderAll()
       if (typeof sessionId !== 'string' || sessionId.length === 0) return
@@ -392,6 +545,13 @@ window.__ModuleLoader__.load({
         const payload = await response.json()
         if (token !== loadToken) return
         highlights.clear()
+        records.clear()
+        for (const entry of Array.isArray(payload?.records) ? payload.records : []) {
+          if (entry === null || typeof entry !== 'object') continue
+          if (typeof entry.id !== 'string' || entry.id.length === 0) continue
+          const stored = buildRecord(entry)
+          if (stored !== null) records.set(stored.id, stored)
+        }
         for (const entry of Array.isArray(payload?.highlights) ? payload.highlights : []) {
           if (entry === null || typeof entry !== 'object') continue
           if (typeof entry.id !== 'string' || entry.anchor === null || typeof entry.anchor !== 'object') continue
@@ -694,6 +854,12 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Shorten one text for a compact list row. */
+    function snippetOf(text, limit) {
+      if (typeof text !== 'string') return ''
+      return text.length <= limit ? text : `${text.slice(0, limit)}…`
+    }
+
     function ClipMenu(props) {
       const { Original, dismiss, readText, translate } = props
       const [expanded, setExpanded] = React.useState(false)
@@ -739,6 +905,10 @@ window.__ModuleLoader__.load({
       const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection))
       const [model, setModel] = React.useState(() => storedModelOf(nodeKey, selection))
       const [modelList, setModelList] = React.useState([])
+      const [meta, setMeta] = React.useState(null)
+      const [answered, setAnswered] = React.useState(null)
+      const [recordsOpen, setRecordsOpen] = React.useState(false)
+      const [, bumpRecords] = React.useState(0)
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
       // shape stable for harnesses without `useChat`.
@@ -824,7 +994,10 @@ window.__ModuleLoader__.load({
             const { value, done } = await reader.read()
             if (done === true) break
             for (const frame of decoder.push(textDecoder.decode(value, { stream: true }))) {
-              if (frame.type === 'delta' && typeof frame.text === 'string') {
+              if (frame.type === 'meta') {
+                const route = normalizeModelRoute({ provider: frame.provider, model: frame.model })
+                if (current() && route !== null) setMeta(route)
+              } else if (frame.type === 'delta' && typeof frame.text === 'string') {
                 text += frame.text
                 if (current()) setAnswer(text)
               } else if (frame.type === 'usage') {
@@ -844,6 +1017,7 @@ window.__ModuleLoader__.load({
 
           if (current()) setStreaming(false)
           if (current() && !failed && text.length > 0) {
+            setAnswered({ question: request.question, answer: text })
             setHistory((previous) => [
               ...previous,
               { role: 'user', text: request.question },
@@ -884,6 +1058,7 @@ window.__ModuleLoader__.load({
         setAnswer('')
         setError('')
         setTokens(null)
+        setAnswered(null)
 
         const request = {
           sessionId,
@@ -914,6 +1089,54 @@ window.__ModuleLoader__.load({
         void persistHighlight('add', updated, sessionId)
       }
 
+      /** Write this card's last successful answer as one 留痕 record. */
+      const saveRecord = () => {
+        if (answered === null) return
+        const entry = buildRecord({
+          highlightId: highlightIdOf(nodeKey, selection) ?? undefined,
+          selection,
+          question: answered.question,
+          answer: answered.answer,
+          provider: meta?.provider ?? model?.provider,
+          model: meta?.model ?? model?.model,
+          usage: tokens ?? undefined,
+        })
+        if (entry === null) return
+        addRecord(entry, sessionId)
+        bumpRecords((value) => value + 1)
+      }
+
+      /** Delete one record from memory and from the store. */
+      const deleteRecord = (id) => {
+        if (!removeRecord(id, sessionId)) return
+        bumpRecords((value) => value + 1)
+      }
+
+      /** One compact 留痕 list row. */
+      const recordRow = (entry) => h('div', {
+        key: entry.id,
+        className: 'clipchat-card__record',
+      },
+        h('div', { className: 'clipchat-card__record-head' },
+          h('span', {
+            className: 'clipchat-card__record-selection',
+            title: entry.selection,
+          }, snippetOf(entry.selection, 60)),
+          isCurrentSelection(entry, selection)
+            ? h('span', { className: 'clipchat-card__tag' }, translate('currentSelection'))
+            : null),
+        h('div', { className: 'clipchat-card__record-q', title: entry.question },
+          snippetOf(entry.question, 160)),
+        h('div', { className: 'clipchat-card__record-a', title: entry.answer },
+          snippetOf(entry.answer, 220)),
+        h('button', {
+          type: 'button',
+          className: 'clipchat-card__record-del',
+          onMouseDown: (event) => event.preventDefault(),
+          onClick: () => deleteRecord(entry.id),
+        }, translate('deleteRecord')),
+      )
+
       const onKeyDown = (event) => {
         // Enter sends, except while an IME composition is confirming.
         if (event.isComposing === true || event.nativeEvent?.isComposing === true) return
@@ -927,6 +1150,12 @@ window.__ModuleLoader__.load({
         ? null
         : `${translate('tokensIn')} ${tokens.input} / ${translate('tokensOut')} ${tokens.output}`
       const modelChoices = modelChoicesOf(modelList, model)
+      const recordEntries = recordList()
+      const alreadyRecorded = answered !== null && recordEntries.some((entry) => (
+        entry.selection === selection
+        && entry.question === answered.question
+        && entry.answer === answered.answer
+      ))
 
       return h('div', { className: 'clipchat-card' },
         h('div', { className: 'clipchat-card__head' },
@@ -975,8 +1204,8 @@ window.__ModuleLoader__.load({
             key: choice.key,
             value: choice.key,
           }, choice.key === FOLLOW_MODEL ? translate('followModel') : choice.name)))),
-        anchor === null || anchor === undefined ? null : h('div', { className: 'clipchat-actions' },
-          h('button', {
+        h('div', { className: 'clipchat-actions' },
+          anchor === null || anchor === undefined ? null : h('button', {
             type: 'button',
             className: 'clipchat-actions__btn',
             onMouseDown: (event) => event.preventDefault(),
@@ -995,7 +1224,26 @@ window.__ModuleLoader__.load({
               if (addHighlight(anchor, model) !== null) setHighlighted(true)
             },
           }, highlighted ? translate('unhighlight') : translate('highlight')),
+          h('button', {
+            type: 'button',
+            className: 'clipchat-actions__btn',
+            disabled: streaming || answered === null || alreadyRecorded,
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: saveRecord,
+          }, alreadyRecorded ? translate('recorded') : translate('record')),
+          h('button', {
+            type: 'button',
+            className: 'clipchat-actions__btn',
+            'aria-expanded': recordsOpen,
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: () => setRecordsOpen((open) => !open),
+          }, `${translate('records')} ${recordEntries.length}`),
         ),
+        recordsOpen ? h('div', { className: 'clipchat-card__records' },
+          recordEntries.length === 0
+            ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
+            : recordEntries.map(recordRow),
+        ) : null,
       )
     }
 
@@ -1077,6 +1325,14 @@ window.__ModuleLoader__.load({
         addHighlight,
         loadSession,
         maybeLoadSession,
+        buildRecord,
+        recordCount,
+        recordList,
+        isCurrentSelection,
+        normalizeUsage,
+        persistRecord,
+        addRecord,
+        removeRecord,
       },
     }
   },
