@@ -17,6 +17,7 @@
 - 2026-11-16 新需求：划词高亮随会话保留（类似公众号划线），归档/删除会话同步清理，后台存储默认 7 天 → 票 10；v2 原型见 `prototype/session-highlights.html`。
 - 2026-11-16 新发现：选区已被 `message-quotes` 的「引用文本」占用（dispatch 首个 open 生效）→ 唤醒方式见 [11](issues/11-trigger-model.md)：已定为「左键菜单（引用+问）」，spec 第 2/8 节已更新。
 - 2026-11-16 实现票 [12-22](issues/) 已发布（ready-for-agent），前沿为 12；下一步 `/implement` 逐张做。
+- 2026-11-16 M1 实现完成：`feat/m1`（27 commits，172 tests）；12-22 全部结票。
 
 ## Decisions so far
 

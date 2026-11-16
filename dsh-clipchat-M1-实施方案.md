@@ -138,7 +138,7 @@ DSH 的回复经常很长。用户读到其中某一段想追问时，只能把�
   updatedAt: number,
   highlights: Array<{
     id: string,
-    anchor: { nodeKey: string, spans: Array<{ blockIndex: number, start: number, end: number }>, text: string },
+    anchor: { nodeKey: string, sourceIndex: number, spans: Array<{ blockIndex: number, start: number, end: number }>, text: string },
     createdAt: number,
   }>,
   records: Array<{
