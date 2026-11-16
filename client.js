@@ -7,6 +7,8 @@ window.__ModuleLoader__.load({
     const ASK_PATH = '/dsh-clipchat/ask'
     const SESSION_PATH = '/dsh-clipchat/session'
     const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
+    const MODELS_PATH = '/dsh-clipchat/models'
+    const FOLLOW_MODEL = 'follow'
     const HISTORY_LIMIT = 12
     const RECENT_LIMIT = 3
 
@@ -34,6 +36,9 @@ window.__ModuleLoader__.load({
       highlight: '高亮这段',
       highlighted: '已高亮',
       unhighlight: '取消高亮',
+      model: '模型',
+      followModel: '跟随主会话',
+      invalidModel: '所选模型不可用，请换一个',
     }
     const en = {
       ask: 'Ask about this',
@@ -59,6 +64,9 @@ window.__ModuleLoader__.load({
       highlight: 'Highlight',
       highlighted: 'Highlighted',
       unhighlight: 'Remove highlight',
+      model: 'Model',
+      followModel: 'Follow main session',
+      invalidModel: 'That model is not available. Pick another.',
     }
 
     const css = `
@@ -79,6 +87,8 @@ window.__ModuleLoader__.load({
 .clipchat-card__send:hover{background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card__send:disabled{opacity:.5;cursor:default}
 .clipchat-card__tokens{opacity:.6;font-size:11px}
+.clipchat-card__modelrow{display:flex;align-items:center;gap:6px}
+.clipchat-card__model{flex:1;min-width:0;border:1px solid var(--dsw-alias-border-l3);border-radius:7px;background:transparent;color:inherit;font:var(--dsw-font-xs-13);padding:3px 6px}
 .clipchat-card__error{color:#d9544d;font-size:12px;white-space:pre-wrap}
 .clipchat-card__hint{opacity:.6;font-size:11px}
 .clipchat-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -233,6 +243,69 @@ window.__ModuleLoader__.load({
       return highlightIdOf(nodeKey, text) !== null
     }
 
+    /**
+     * Copy one complete model route, or null when the shape is incomplete.
+     * @param {unknown} value - route from the catalog, a stored highlight or state.
+     * @returns {{ provider: string, model: string, reasoningEffort?: string } | null} route.
+     */
+    function normalizeModelRoute(value) {
+      if (value === null || typeof value !== 'object') return null
+      if (typeof value.provider !== 'string' || value.provider.length === 0) return null
+      if (typeof value.model !== 'string' || value.model.length === 0) return null
+      return typeof value.reasoningEffort === 'string' && value.reasoningEffort.length > 0
+        ? { provider: value.provider, model: value.model, reasoningEffort: value.reasoningEffort }
+        : { provider: value.provider, model: value.model }
+    }
+
+    /**
+     * Stable select value of one route; the follow choice uses its own key.
+     * @param {unknown} value - route, or null for follow.
+     * @returns {string} option value.
+     */
+    function modelKeyOf(value) {
+      const route = normalizeModelRoute(value)
+      return route === null ? FOLLOW_MODEL : `${route.provider}\u0000${route.model}`
+    }
+
+    /**
+     * Menu entries: follow first, then the catalog, then the active selection
+     * when the catalog does not advertise it (listing failed or went stale).
+     * @param {unknown} models - `/models` entries.
+     * @param {unknown} selected - the card's current route, or null for follow.
+     * @returns {Array<{ key: string, provider: string | null, model: string | null, name: string | null }>} choices.
+     */
+    function modelChoicesOf(models, selected) {
+      const choices = [{ key: FOLLOW_MODEL, provider: null, model: null, name: null }]
+      const seen = new Set([FOLLOW_MODEL])
+      const add = (entry) => {
+        const route = normalizeModelRoute(entry)
+        if (route === null) return
+        const key = modelKeyOf(route)
+        if (seen.has(key)) return
+        seen.add(key)
+        const name = entry !== null && typeof entry === 'object'
+          && typeof entry.name === 'string' && entry.name.trim().length > 0
+          ? entry.name
+          : route.model
+        choices.push({ key, provider: route.provider, model: route.model, name })
+      }
+      for (const entry of Array.isArray(models) ? models : []) add(entry)
+      add(selected)
+      return choices
+    }
+
+    /**
+     * Model saved on the highlight covering this exact passage, if any.
+     * @param {string} nodeKey - chat node key.
+     * @param {string} text - selected passage text.
+     * @returns {{ provider: string, model: string, reasoningEffort?: string } | null} stored route.
+     */
+    function storedModelOf(nodeKey, text) {
+      const id = highlightIdOf(nodeKey, text)
+      if (id === null) return null
+      return normalizeModelRoute(highlights.get(id)?.model)
+    }
+
     /** A client-generated id; the host stores it verbatim. */
     function newHighlightId() {
       return `h${Date.now().toString(36)}${(nextHighlightId++).toString(36)}`
@@ -269,9 +342,10 @@ window.__ModuleLoader__.load({
     /**
      * Store one highlight locally, then persist it.
      * @param {ReturnType<typeof anchorFromSelection>} anchor - captured anchor.
+     * @param {unknown} [model] - model route to save with the highlight.
      * @returns {string | null} highlight id.
      */
-    function addHighlight(anchor) {
+    function addHighlight(anchor, model = null) {
       if (anchor === null) return null
       if (hasHighlight(anchor.nodeKey, anchor.text)) return null
       const entry = {
@@ -279,6 +353,8 @@ window.__ModuleLoader__.load({
         anchor: Object.assign({}, anchor),
         createdAt: Date.now(),
       }
+      const route = normalizeModelRoute(model)
+      if (route !== null) entry.model = route
       highlights.set(entry.id, entry)
       scheduleRender()
       void persistHighlight('add', entry)
@@ -319,11 +395,14 @@ window.__ModuleLoader__.load({
         for (const entry of Array.isArray(payload?.highlights) ? payload.highlights : []) {
           if (entry === null || typeof entry !== 'object') continue
           if (typeof entry.id !== 'string' || entry.anchor === null || typeof entry.anchor !== 'object') continue
-          highlights.set(entry.id, {
+          const stored = {
             id: entry.id,
             anchor: entry.anchor,
             createdAt: entry.createdAt,
-          })
+          }
+          const model = normalizeModelRoute(entry.model)
+          if (model !== null) stored.model = model
+          highlights.set(entry.id, stored)
         }
         renderAll()
       } catch (error) {
@@ -608,6 +687,7 @@ window.__ModuleLoader__.load({
         case 'unauthorized':
         case 'forbidden': return translate('forbidden')
         case 'body-too-large': return translate('contextTooLong')
+        case 'invalid-model': return translate('invalidModel')
         default: return typeof payload?.message === 'string' && payload.message.length > 0
           ? payload.message
           : translate('failed')
@@ -657,6 +737,8 @@ window.__ModuleLoader__.load({
       const [streaming, setStreaming] = React.useState(false)
       const [history, setHistory] = React.useState([])
       const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection))
+      const [model, setModel] = React.useState(() => storedModelOf(nodeKey, selection))
+      const [modelList, setModelList] = React.useState([])
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
       // shape stable for harnesses without `useChat`.
@@ -667,6 +749,26 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         if (textareaRef.current !== null) textareaRef.current.focus()
+      }, [])
+
+      // One catalog read per card open; a failed read leaves follow plus the
+      // stored choice, so the menu never blocks asking.
+      React.useEffect(() => {
+        let alive = true
+        if (typeof fetch !== 'function') return () => { alive = false }
+        const session = writeSessionId(sessionId)
+        const query = session === null ? '' : `?sessionId=${encodeURIComponent(session)}`
+        fetch(`${MODELS_PATH}${query}`)
+          .then(async (response) => {
+            if (response.ok !== true) throw new Error(`status ${response.status}`)
+            const payload = await response.json()
+            if (!alive || !Array.isArray(payload?.models)) return
+            setModelList(payload.models)
+          })
+          .catch((error) => {
+            if (alive) console.warn('dsh-clipchat: model list was not loaded', error)
+          })
+        return () => { alive = false }
       }, [])
 
       React.useEffect(() => () => {
@@ -783,7 +885,7 @@ window.__ModuleLoader__.load({
         setError('')
         setTokens(null)
 
-        void ask({
+        const request = {
           sessionId,
           selection,
           message,
@@ -791,7 +893,25 @@ window.__ModuleLoader__.load({
           recent,
           history,
           question,
-        }, requestId, controller.signal)
+        }
+        if (model !== null) request.model = model
+        void ask(request, requestId, controller.signal)
+      }
+
+      /** Select one menu entry and persist it on the covering highlight. */
+      const chooseModel = (key) => {
+        const choice = modelChoicesOf(modelList, model).find((entry) => entry.key === key)
+        const next = choice !== undefined && choice.model !== null ? normalizeModelRoute(choice) : null
+        setModel(next)
+
+        const id = highlightIdOf(nodeKey, selection)
+        if (id === null) return
+        const entry = highlights.get(id)
+        if (entry === undefined) return
+        const updated = { id: entry.id, anchor: entry.anchor, createdAt: entry.createdAt }
+        if (next !== null) updated.model = next
+        highlights.set(id, updated)
+        void persistHighlight('add', updated, sessionId)
       }
 
       const onKeyDown = (event) => {
@@ -806,6 +926,7 @@ window.__ModuleLoader__.load({
       const tokenLine = tokens === null
         ? null
         : `${translate('tokensIn')} ${tokens.input} / ${translate('tokensOut')} ${tokens.output}`
+      const modelChoices = modelChoicesOf(modelList, model)
 
       return h('div', { className: 'clipchat-card' },
         h('div', { className: 'clipchat-card__head' },
@@ -842,6 +963,18 @@ window.__ModuleLoader__.load({
           }, streaming ? translate('sending') : translate('send')),
         ),
 
+        h('div', { className: 'clipchat-card__modelrow' },
+          h('span', { className: 'clipchat-card__label' }, translate('model')),
+          h('select', {
+            className: 'clipchat-card__model',
+            'aria-label': translate('model'),
+            title: translate('model'),
+            value: modelKeyOf(model),
+            onChange: (event) => chooseModel(event.target.value),
+          }, modelChoices.map((choice) => h('option', {
+            key: choice.key,
+            value: choice.key,
+          }, choice.key === FOLLOW_MODEL ? translate('followModel') : choice.name)))),
         anchor === null || anchor === undefined ? null : h('div', { className: 'clipchat-actions' },
           h('button', {
             type: 'button',
@@ -859,7 +992,7 @@ window.__ModuleLoader__.load({
                 void persistHighlight('remove', { id }, sessionId)
                 return
               }
-              if (addHighlight(anchor) !== null) setHighlighted(true)
+              if (addHighlight(anchor, model) !== null) setHighlighted(true)
             },
           }, highlighted ? translate('unhighlight') : translate('highlight')),
         ),
@@ -937,6 +1070,11 @@ window.__ModuleLoader__.load({
         currentSessionIdOf,
         highlightIdOf,
         hasHighlight,
+        storedModelOf,
+        normalizeModelRoute,
+        modelKeyOf,
+        modelChoicesOf,
+        addHighlight,
         loadSession,
         maybeLoadSession,
       },
