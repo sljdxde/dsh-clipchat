@@ -36,7 +36,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "coverage": "node --experimental-test-coverage --test test/*.test.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -51,5 +52,10 @@
     "deepseek-harness",
     "quote",
     "annotation"
-  ]
+  ],
+  "devDependencies": {
+    "jsdom": "^31.0.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
 }

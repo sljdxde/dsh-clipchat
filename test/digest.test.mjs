@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { buildContext, LIMITS } from '../lib/context.js'
-import { buildDigest, CHARS_PER_TOKEN, DIGEST_LIMITS, renderDigest } from '../lib/digest.js'
+import { buildDigest, CHARS_PER_TOKEN, DIGEST_LIMITS, digestStats, renderDigest } from '../lib/digest.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -236,4 +236,77 @@ test('the raised ceiling keeps the digest instead of trimming it away', () => {
   assert.ok(detailed.messages[0].content[0].text.includes('the passage'), 'the selection survives')
   assert.ok(detailed.messages[0].content[0].text.includes('<history>'), 'the digest survives')
   assert.ok(sizeOf(detailed) <= 60000, 'the raised ceiling is still a ceiling')
+})
+
+test('the detailed ceiling always fits a full digest plus the local context', () => {
+  // The two budgets are independent, so the ceiling must be their sum. A
+  // smaller one makes a maximum-size digest fail once the passage's own
+  // context is added, which is what the user saw as 上下文过长.
+  const ceiling = DIGEST_LIMITS.totalChars + LIMITS.totalChars
+  const digest = `<history>${'x'.repeat(DIGEST_LIMITS.totalChars - 20)}</history>`
+  const local = 'y'.repeat(LIMITS.totalChars - 200)
+
+  const built = buildContext({
+    selection: 'the passage',
+    message: local,
+    turn: 5,
+    recent: [],
+    neighbors: { user: '', before: '', after: '' },
+    question: '解释这段',
+    digest,
+    totalChars: ceiling,
+    model: { provider: 'p', model: 'm' },
+    createAssistantMessage,
+  })
+
+  const context = built.messages[0].content[0].text
+  assert.ok(context.includes('<history>'), 'the digest survives')
+  assert.ok(context.includes('the passage'), 'the selection survives')
+  assert.ok(built.system.length + context.length < ceiling)
+})
+
+test('a digest over its ceiling shrinks turns before dropping the summary', () => {
+  // Session events, in the shape the host writes them.
+  const events = []
+  for (let turn = 1; turn <= 40; turn += 1) {
+    events.push({ type: 'user/message', data: { turn, content: [{ type: 'text', text: `question ${turn} ${'q'.repeat(400)}` }] } })
+    events.push({
+      type: 'assistant/message',
+      data: {
+        turn,
+        message: {
+          content: [
+            { type: 'text', text: `answer ${turn} ${'a'.repeat(900)}` },
+            ...Array.from({ length: 5 }, (_, index) => ({ type: 'tool-call', name: `tool-${index}-${'n'.repeat(60)}` })),
+          ],
+        },
+      },
+    })
+  }
+  // A summary is a content-block array, the same shape a message has.
+  events.push({
+    type: 'compaction/summary',
+    data: { summary: [{ type: 'text', text: 'the summary '.repeat(2000) }] },
+  })
+
+  const digest = buildDigest(events, { limits: { ...DIGEST_LIMITS, totalChars: 3000 } })
+
+  assert.ok(digest.chars <= 3000, 'the digest fits the ceiling')
+  assert.ok(digest.turns.length > 0, 'some turns survived')
+  assert.ok(digest.omittedTurns > 0, 'the folded turns are counted')
+  // The newest turns are the ones kept, and the summary gives up its room
+  // before the turns do.
+  assert.equal(digest.turns.at(-1).turn, 40, 'the newest turn survived')
+  assert.ok(digest.chars <= 3000)
+})
+
+test('a digest with an empty event list is empty but valid', () => {
+  const digest = buildDigest([])
+  assert.deepEqual(digest.turns, [])
+  assert.equal(digest.summary, '')
+  assert.equal(digest.chars, 0)
+  assert.equal(digest.omittedTurns, 0)
+  assert.equal(digestStats(digest).turns, 0)
+  // Nothing to say means no block at all, so the caller can skip injecting one.
+  assert.equal(renderDigest(digest), '', 'an empty digest renders nothing')
 })

@@ -1759,13 +1759,15 @@ window.__ModuleLoader__.load({
      * the in-flight or failed question.
      * @param {Array<{ role: string, text: string }>} history - completed pairs.
      * @param {{ question: string, answer: string, streaming?: boolean, error?: string } | null} current - in-flight turn.
-     * @param {{ question: string, answer: string } | null} [loadedRecord] - record opened from a highlight.
+     * @param {{ turns?: Array<{ question: string, answer: string }> } | null} [loadedRecord] - record opened from a highlight; every turn of it is shown.
      * @returns {Array<object>} turns in display order.
      */
     function threadTurns(history, current, loadedRecord = null) {
       const turns = []
-      if (loadedRecord !== null && loadedRecord !== undefined) {
-        turns.push(turnOf(loadedRecord.question, loadedRecord.answer))
+      const stored = Array.isArray(loadedRecord?.turns) ? loadedRecord.turns : []
+      for (const turn of stored) {
+        if (typeof turn?.question !== 'string') continue
+        turns.push(turnOf(turn.question, typeof turn.answer === 'string' ? turn.answer : ''))
       }
       const entries = Array.isArray(history) ? history : []
       for (let index = 0; index < entries.length; index += 1) {
@@ -1945,9 +1947,11 @@ window.__ModuleLoader__.load({
       const [recordsView, setRecordsView] = React.useState('session')
       const search = useCrossSessionSearch(recordsView === 'all')
       const [meta, setMeta] = React.useState(null)
-      const [answered, setAnswered] = React.useState(() => loadedRecord === null
-        ? null
-        : { question: loadedRecord.question, answer: loadedRecord.answer })
+      const [answered, setAnswered] = React.useState(() => {
+        const stored = Array.isArray(loadedRecord?.turns) ? loadedRecord.turns : []
+        const newest = stored.length > 0 ? stored[stored.length - 1] : null
+        return newest === null ? null : { question: newest.question, answer: newest.answer }
+      })
       const [recordsOpen, setRecordsOpen] = React.useState(false)
       const [insertState, setInsertState] = React.useState('idle')
       const [copiedTurn, setCopiedTurn] = React.useState(null)
@@ -2272,7 +2276,12 @@ window.__ModuleLoader__.load({
         return entry.id
       }
 
-      /** Keep the current answer, or drop just the answer it was kept as. */
+      /**
+       * Keep the current answer, or drop just the answer it was kept as.
+       *
+       * The footer disables this button when there is neither a saved record nor
+       * an answer, so the handler always has one of the two to act on.
+       */
       const toggleRecord = () => {
         if (savedRecordId !== null) {
           const entry = records.get(savedRecordId)
@@ -2289,7 +2298,6 @@ window.__ModuleLoader__.load({
           bumpRecords((value) => value + 1)
           return
         }
-        if (answered === null) return
         setSavedRecordId(keepAnswer(answered.question, answered.answer, tokens, meta))
       }
 
@@ -2934,22 +2942,38 @@ window.__ModuleLoader__.load({
         searchKeyOf,
         dateTextOf,
         ClipNotice,
+        ClipMenu,
         ClipCard,
         currentSessionIdOf,
         highlightIdOf,
         highlightIdOfRecord,
         revealHighlight,
+        openHighlight,
+        centreInColumn,
         turnOfNodeKey,
         turnOfNode,
         turnOfText,
+        navigateToTurn,
+        holdCentred,
+        nodesFor,
+        blocksOf,
+        offsetWithin,
+        layerFor,
+        rangeForSpan,
+        recordForHighlight,
+        ensureStyle,
+        renderAll,
+        scheduleRender,
+        loadSession,
         hasHighlight,
         storedModelOf,
         normalizeModelRoute,
         modelKeyOf,
         modelChoicesOf,
         addHighlight,
-        loadSession,
+        removeHighlight,
         maybeLoadSession,
+        scheduleSessionCheck,
         buildRecord,
         recordWithTurn,
         recordWithoutLastTurn,

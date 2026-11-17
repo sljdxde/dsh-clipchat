@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { loadBundle } from './helpers/load-client.mjs'
 import { makeRecord, makeTurn } from './helpers/records.mjs'
 
 const react = {
@@ -9,20 +10,15 @@ const react = {
   useRef: () => ({ current: null }),
 }
 
-let bundleSequence = 0
-
-/** Load the browser bundle through a fake ModuleLoader against one document stub. */
+/** Load the browser bundle through the shared loader against one document stub. */
 async function loadPlugin(documentStub) {
-  let definition
   globalThis.window = {
-    __ModuleLoader__: { load(value) { definition = value } },
+    __ModuleLoader__: { load() {} },
     setTimeout: (fn, delay) => setTimeout(fn, delay),
     clearTimeout: (handle) => clearTimeout(handle),
   }
   globalThis.document = documentStub
-  const url = new URL('../client.js', import.meta.url)
-  await import(`${url.href}?v=${++bundleSequence}`)
-  assert.ok(definition, 'bundle registered itself')
+  const { definition } = await loadBundle()
   return definition.factory(() => react).__test
 }
 
@@ -341,4 +337,59 @@ test('persisting a record posts to the record route and tolerates failure', asyn
 
   globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) })
   await test_.persistRecord('remove', { id: 'r1' }, 'session-a')
+})
+
+test('a failed highlight write is logged, not thrown', async () => {
+  const warnings = []
+  const originalWarn = console.warn
+  console.warn = (...args) => { warnings.push(args.join(' ')) }
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) })
+  try {
+    const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+    const id = test_.addHighlight({
+      nodeKey: '1:assistant-step1:1',
+      sourceIndex: 0,
+      spans: [{ blockIndex: 0, start: 0, end: 5 }],
+      text: 'hello',
+    }, null)
+    assert.ok(id, 'the highlight is kept in memory even when the write fails')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.ok(warnings.some((line) => line.includes('highlight was not saved')), 'the failure was logged')
+  } finally {
+    console.warn = originalWarn
+  }
+})
+
+test('a failed session read is logged and leaves the card empty', async () => {
+  const warnings = []
+  const originalWarn = console.warn
+  console.warn = (...args) => { warnings.push(args.join(' ')) }
+  globalThis.fetch = async () => { throw new Error('session route down') }
+  try {
+    const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+    await test_.loadSession('session-a')
+    assert.equal(test_.recordCount(), 0)
+    assert.ok(warnings.some((line) => line.includes('session highlights were not loaded')), 'the failure was logged')
+  } finally {
+    console.warn = originalWarn
+  }
+})
+
+test('scheduleSessionCheck debounces repeated calls', async () => {
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+  const originalFetch = globalThis.fetch
+  let reads = 0
+  globalThis.fetch = async () => {
+    reads += 1
+    return { ok: true, json: async () => ({ highlights: [], records: [] }) }
+  }
+  try {
+    test_.scheduleSessionCheck()
+    test_.scheduleSessionCheck()
+    test_.scheduleSessionCheck()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    assert.equal(reads, 1, 'three calls collapsed into one read')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

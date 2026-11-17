@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { apply } from '../index.js'
-import { call, makeRequest } from './helpers/http.mjs'
+import { call, FakeResponse, makeRequest } from './helpers/http.mjs'
 import { createStore } from '../lib/store.js'
 import { makeRecord } from './helpers/records.mjs'
 
 const SESSION_PATH = '/dsh-clipchat/session'
+const ASK_PATH = '/dsh-clipchat/ask'
 const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
 
 
@@ -17,7 +18,7 @@ function payloadOf(res) {
   return JSON.parse(res.raw)
 }
 
-function makeContext({ connection, sessions, workspaceRegistry, sessionQuery } = {}) {
+function makeContext({ connection, sessions, workspaceRegistry, sessionQuery, llm } = {}) {
   const routes = new Map()
   const disposers = []
   const webServer = {
@@ -36,7 +37,7 @@ function makeContext({ connection, sessions, workspaceRegistry, sessionQuery } =
     },
   }
   const ctx = {
-    get: (name) => ({ connection, sessions, workspaceRegistry, sessionQuery })[name],
+    get: (name) => ({ connection, sessions, workspaceRegistry, sessionQuery, llm })[name],
     effect(fn) {
       const dispose = fn()
       if (typeof dispose === 'function') disposers.push(dispose)
@@ -69,9 +70,10 @@ async function setup({
   sessionQuery,
   sessions,
   workspaceRegistry,
+  llm,
 } = {}) {
   const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
-  const { ctx, routes, disposers } = makeContext({ connection, sessionQuery, sessions, workspaceRegistry })
+  const { ctx, routes, disposers } = makeContext({ connection, sessionQuery, sessions, workspaceRegistry, llm })
   apply(ctx, { storeRoot })
   return { routes, disposers, storeRoot, store: createStore({ root: storeRoot }) }
 }
@@ -860,4 +862,79 @@ test('the context route honours the connection guard', async () => {
     method: 'GET', url: `${CONTEXT_PATH}?sessionId=session-a`, headers: { host: 'h' },
   }))
   assert.equal(res.status, 401)
+})
+
+test('an ask against a context route whose lease throws still answers', async () => {
+  const { routes } = await setup({
+    sessionQuery: {
+      observeSession() {
+        return {
+          events: [{ type: 'user/message', data: { turn: 1, content: [{ type: 'text', text: 'hi' }] } }],
+          [Symbol.dispose]() { throw new Error('lease release failed') },
+        }
+      },
+    },
+  })
+
+  const res = await call(routes.get(CONTEXT_PATH), makeRequest({
+    method: 'GET',
+    url: `${CONTEXT_PATH}?sessionId=session-a`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200, 'a failing dispose must not fail the request')
+  assert.equal(payloadOf(res).available, true)
+})
+
+test('a response destroyed before the stream opens is not written to', async () => {
+  // A response that reports itself destroyed before the stream opens must not
+  // be written to; the route returns without opening SSE.
+  const { routes } = await setup({
+    sessions: { get: () => ({ requestHeader: () => ({ config: { provider: 'deepseek', model: 'chat' } }) }) },
+    llm: { stream: () => (async function* () {})() },
+  })
+  const res = new FakeResponse()
+  res.destroyed = true
+
+  await routes.get(ASK_PATH)(makeRequest({
+    headers: { host: 'h' },
+    body: {
+      sessionId: 'session-a',
+      selection: 'the selected passage',
+      message: 'the whole assistant message',
+      question: 'what does it mean?',
+    },
+  }), res)
+
+  assert.equal(res.raw, '', 'nothing was written to a destroyed response')
+})
+
+test('a session read that throws is reported as store-unavailable', async () => {
+  // A store root that is a file makes every read inside it fail.
+  const root = join(await mkdtemp(join(tmpdir(), 'clipchat-broken-')), 'not-a-dir')
+  await writeFile(root, 'x')
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx, { storeRoot: root })
+
+  const res = await call(routes.get(SESSION_PATH), makeRequest({
+    method: 'GET',
+    url: `${SESSION_PATH}?sessionId=session-a`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 500)
+  assert.equal(payloadOf(res).error, 'store-unavailable')
+})
+
+test('a malformed url on the session route reports a missing id', async () => {
+  const { routes } = await setup()
+
+  const res = await call(routes.get(SESSION_PATH), makeRequest({
+    method: 'GET',
+    url: 'http://[bad',
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.equal(payloadOf(res).error, 'missing-session-id')
 })

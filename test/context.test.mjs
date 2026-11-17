@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildContext, LIMITS, SYSTEM_PROMPT } from '../lib/context.js'
+import { buildContext, LIMITS, renderContext, SYSTEM_PROMPT } from '../lib/context.js'
 
 /** Minimal stand-in for the host `createAssistantMessage` helper. */
 function createAssistantMessage(input) {
@@ -250,4 +250,118 @@ test('missing or malformed neighbours are ignored', () => {
     assert.ok(!text.includes('<before>'))
     assert.ok(!text.includes('<after>'))
   }
+})
+
+test('an empty question is refused', () => {
+  assert.throws(
+    () => buildContext({
+      selection: 'a passage',
+      message: 'the message',
+      question: '   ',
+      model: { provider: 'p', model: 'm' },
+      createAssistantMessage,
+    }),
+    (error) => error.code === 'empty-question',
+  )
+})
+
+test('a context over the ceiling drops neighbours before the message', () => {
+  // A long message plus long neighbours: the budget forces the shrink ladder
+  // through every rung.
+  const long = 'x'.repeat(9000)
+  const built = buildContext({
+    selection: 'a passage',
+    message: long,
+    turn: 3,
+    recent: Array.from({ length: 3 }, (_, index) => ({ turn: index + 1, user: long, assistant: long })),
+    neighbors: { user: long, before: long, after: long },
+    history: Array.from({ length: 12 }, () => ({ role: 'user', text: long })),
+    question: 'what does it mean?',
+    model: { provider: 'p', model: 'm' },
+    createAssistantMessage,
+  })
+
+  const context = built.messages[0].content[0].text
+  assert.ok(context.includes('a passage'), 'the selection is never trimmed')
+  assert.ok(context.length <= LIMITS.totalChars + 200, 'the context fits the ceiling')
+})
+
+test('a context that cannot fit even after shrinking is refused', () => {
+  // The selection and the question are never trimmed, so a question big enough
+  // to fill the budget on its own leaves the shrink ladder nothing to give.
+  assert.throws(
+    () => buildContext({
+      selection: 'y'.repeat(LIMITS.selectionChars),
+      message: 'z'.repeat(200_000),
+      question: 'q'.repeat(LIMITS.totalChars),
+      model: { provider: 'p', model: 'm' },
+      createAssistantMessage,
+    }),
+    (error) => error.code === 'context-too-long',
+  )
+})
+
+test('renderContext emits the digest block in place of recent turns', () => {
+  const parts = {
+    turnUser: '',
+    before: '',
+    message: 'the message',
+    after: '',
+    neighbors: { user: '', before: '', after: '' },
+    selection: 'a passage',
+    digest: '<summary>folded</summary>',
+    recent: [],
+    history: [],
+    question: 'q',
+  }
+  const text = renderContext(parts)
+  assert.ok(text.includes('<summary>folded</summary>'), 'the digest is inlined')
+  assert.equal(text.includes('<recent>'), false, 'recent turns are replaced, not duplicated')
+})
+
+test('a context over the ceiling drops recent turns before neighbours', () => {
+  const long = 'x'.repeat(6000)
+  const built = buildContext({
+    selection: 'a passage',
+    message: long,
+    turn: 5,
+    recent: Array.from({ length: 3 }, (_, index) => ({ turn: index + 1, user: long, assistant: long })),
+    neighbors: { user: 'u', before: 'b', after: 'a' },
+    question: 'what does it mean?',
+    model: { provider: 'p', model: 'm' },
+    createAssistantMessage,
+  })
+
+  const context = built.messages[0].content[0].text
+  assert.ok(context.includes('a passage'), 'the selection survived')
+  assert.ok(context.length <= LIMITS.totalChars + 200, 'the context fits')
+})
+
+test('recent turns are dropped once the history has been given up', () => {
+  // Oversized neighbours and a full message leave no room for the recent
+  // turns, so the recent list is emptied before the shrink ladder runs.
+  const built = buildContext({
+    selection: 'a passage',
+    message: 'm'.repeat(LIMITS.messageChars),
+    turn: 9,
+    turnUser: 't'.repeat(LIMITS.turnUserChars),
+    recent: Array.from({ length: LIMITS.recentTurns }, (_, index) => ({
+      turn: index + 1,
+      user: 'r'.repeat(LIMITS.turnChars),
+      assistant: 'r'.repeat(LIMITS.turnChars),
+    })),
+    neighbors: {
+      user: 'u'.repeat(LIMITS.neighborChars),
+      before: 'b'.repeat(LIMITS.neighborChars),
+      after: 'a'.repeat(LIMITS.neighborChars),
+    },
+    question: 'what does it mean?',
+    model: { provider: 'p', model: 'm' },
+    createAssistantMessage,
+  })
+
+  const context = built.messages[0].content[0].text
+  assert.ok(context.includes('a passage'), 'the selection survived')
+  assert.equal(context.includes('<recent>'), false, 'every recent turn was dropped')
+  assert.ok(context.length <= LIMITS.totalChars + 200, 'the context fits')
 })

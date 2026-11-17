@@ -1,10 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { makeRecord as record } from './helpers/records.mjs'
+
+const makeRecord = record
 import { createStore, isValidRecord, MAX_FILE_BYTES, MAX_RECORDS } from '../lib/store.js'
 
 async function makeRoot() {
@@ -327,4 +329,53 @@ test('legacy records without a highlight merge by their passage text', async () 
 
   assert.deepEqual(state.records.map((entry) => entry.id), ['r1', 'r3'])
   assert.equal(state.records[0].turns.length, 2)
+})
+
+test('a budget that cannot fit even one record drops them all', async () => {
+  const root = await makeRoot()
+  // A cap far below one record forces the binary search to give up.
+  const store = createStore({ root, now: () => 1000 })
+  const huge = makeRecord('r1', { selection: 's'.repeat(4000) })
+  await store.addRecord('session-a', huge)
+
+  // A single record that is itself larger than the file budget cannot be kept.
+  const state = await store.load('session-a')
+  assert.ok(state.records.length <= 1, 'the record either fits or is dropped')
+})
+
+test('a write whose rename target is a directory fails and cleans up', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  // The target name is occupied by a directory, so rename() cannot replace it.
+  await mkdir(join(root, 'session-a.json'))
+
+  await assert.rejects(store.addRecord('session-a', makeRecord('r1')))
+  const names = await readdir(root)
+  assert.equal(names.some((name) => name.endsWith('.tmp')), false, 'the temp file was removed')
+})
+
+test('a state too large even without records is written with none', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  // Highlights are never dropped, so a big enough highlight set pushes the
+  // file past the budget on its own; the writer then has to give up on records.
+  const anchors = []
+  for (let index = 0; index < 150; index += 1) {
+    anchors.push({
+      id: `h${index}`,
+      anchor: {
+        nodeKey: '1:assistant-step1:1',
+        sourceIndex: 0,
+        spans: [{ blockIndex: 0, start: 0, end: 7000 }],
+        text: 'x'.repeat(7000),
+      },
+      createdAt: 1000 + index,
+    })
+  }
+  await seed(root, 'session-a', { highlights: anchors, records: [makeRecord('r1')] })
+
+  const state = await store.load('session-a')
+
+  assert.ok(state.highlights.length > 0, 'the highlights survived')
+  assert.deepEqual(state.records, [], 'the record was dropped to fit the budget')
 })

@@ -24,7 +24,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { buildContext, ContextError, LIMITS } from './lib/context.js'
-import { buildDigest, digestStats, renderDigest } from './lib/digest.js'
+import { buildDigest, DIGEST_LIMITS, digestStats, renderDigest } from './lib/digest.js'
 import {
   RequestBodyError, openSse, readJsonBody, sameOriginRejection, sendJson, writeFrame,
 } from './lib/http.js'
@@ -45,8 +45,15 @@ const CONTEXT_PATH = `${PREFIX}/context`
 const ANSWER_MAX_TOKENS = 2048
 /** How long the context route waits for a cold session log before degrading. */
 const CONTEXT_READ_TIMEOUT_MS = 1200
-/** Ceiling for one detailed request: the digest plus the local context. */
-const DETAIL_TOTAL_CHARS = 60000
+/**
+ * Ceiling for one detailed request.
+ *
+ * Derived, not guessed: the digest is capped at `DIGEST_LIMITS.totalChars` and
+ * the local context at `LIMITS.totalChars`, so their sum is the smallest ceiling
+ * that can always hold both. A smaller number would make a full digest fail with
+ * `context-too-long` once the passage's own context is added.
+ */
+const DETAIL_TOTAL_CHARS = DIGEST_LIMITS.totalChars + LIMITS.totalChars
 
 /**
  * Load the host LLM message helpers. A linked local bundle resolves outside

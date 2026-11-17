@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -446,4 +446,127 @@ test('search reports truncation when the file cap is reached', async () => {
   assert.equal(corpus.sessions.length, 1)
   assert.equal(corpus.truncated, true)
   assert.equal(corpus.scanned, 1)
+})
+
+test('touch reports false for a corrupt or foreign state file', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 5000 })
+  await writeFile(join(root, 'session-a.json'), '{not json')
+  await writeFile(join(root, 'session-b.json'), JSON.stringify({ version: 99, sessionId: 'session-b' }))
+
+  assert.equal(await store.touch('session-a'), false, 'corrupt JSON is not touched')
+  assert.equal(await store.touch('session-b'), false, 'a foreign version is not touched')
+  assert.equal(await store.touch('session-missing'), false, 'a missing file is not created')
+})
+
+test('search skips a state file that cannot be parsed', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 5000 })
+  await store.addRecord('session-good', makeRecord('r1'))
+  await writeFile(join(root, 'session-bad.json'), '{not json')
+
+  const corpus = await store.readAllForSearch()
+
+  assert.deepEqual(corpus.sessions.map((session) => session.sessionId), ['session-good'])
+})
+
+test('a write that fails leaves no temporary file behind', async () => {
+  // The store's own `chmod(root, 0o700)` repairs the directory, so the failure
+  // has to come from something it cannot repair: a session id whose file name
+  // is a directory.
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  await mkdir(join(root, 'session-a.json'))
+
+  await assert.rejects(store.addRecord('session-a', makeRecord('r1')))
+
+  const names = await readdir(root)
+  assert.deepEqual(names, ['session-a.json'], 'no temporary file was left behind')
+})
+
+test('search skips a file that disappears between listing and reading', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  await store.addRecord('session-a', makeRecord('r1'))
+  // Remove the file after the directory listing is taken.
+  const target = join(root, 'session-a.json')
+  const original = await readFile(target, 'utf8')
+  await rm(target)
+
+  const corpus = await store.readAllForSearch()
+
+  assert.deepEqual(corpus.sessions, [], 'a vanished file is skipped')
+  // Restoring it proves the reader was looking at the right path.
+  await writeFile(target, original)
+})
+
+test('a rename onto an occupied name fails and leaves no temp file', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  // The target name is a non-empty directory: rename() cannot replace it.
+  await mkdir(join(root, 'session-a.json'))
+  await writeFile(join(root, 'session-a.json', 'blocker'), 'x')
+
+  await assert.rejects(store.addRecord('session-a', makeRecord('r1')))
+
+  const names = await readdir(root)
+  assert.equal(names.some((name) => name.endsWith('.tmp')), false, 'the temp file was removed')
+})
+
+test('search skips an entry that is not a regular file', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  await store.addRecord('session-good', makeRecord('r1'))
+  // A directory named like a state file is not a state file.
+  await mkdir(join(root, 'session-dir.json'))
+
+  const corpus = await store.readAllForSearch()
+
+  assert.deepEqual(corpus.sessions.map((session) => session.sessionId), ['session-good'])
+})
+
+test('search stops at the file cap and reports truncation', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  for (const id of ['session-a', 'session-b', 'session-c']) {
+    await store.addRecord(id, makeRecord(`r-${id}`))
+  }
+
+  const corpus = await store.readAllForSearch({ maxFiles: 2 })
+
+  assert.equal(corpus.scanned, 2, 'only the cap was scanned')
+  assert.equal(corpus.truncated, true, 'the caller is told the corpus is partial')
+  assert.equal(corpus.sessions.length, 2)
+})
+
+test('search skips an entry whose stat fails', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  await store.addRecord('session-good', makeRecord('r1'))
+  // A dangling symlink lists like a state file but cannot be stat'ed.
+  await symlink(join(root, 'gone.json'), join(root, 'session-broken.json'))
+
+  const corpus = await store.readAllForSearch()
+
+  assert.deepEqual(corpus.sessions.map((session) => session.sessionId), ['session-good'],
+    'the unreadable entry was skipped')
+})
+
+test('search skips a state file it is not allowed to read', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  await store.addRecord('session-good', makeRecord('r1'))
+  await writeFile(join(root, 'session-locked.json'), JSON.stringify({
+    version: 1, sessionId: 'session-locked', updatedAt: Date.now(), highlights: [], records: [makeRecord('r2')],
+  }))
+  // A file with no read permission makes readFile fail with EACCES, which is
+  // not ENOENT, so the reader has to skip it rather than abort the search.
+  await chmod(join(root, 'session-locked.json'), 0o000)
+  try {
+    const corpus = await store.readAllForSearch()
+    assert.deepEqual(corpus.sessions.map((session) => session.sessionId), ['session-good'],
+      'the unreadable file was skipped')
+  } finally {
+    await chmod(join(root, 'session-locked.json'), 0o600)
+  }
 })

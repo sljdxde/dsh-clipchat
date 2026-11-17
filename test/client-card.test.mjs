@@ -222,11 +222,15 @@ test('reopening a highlight keeps its earlier question out of the composer', asy
     plugin.__test.addRecord({
       id: 'r-reopen',
       selection: 'selected passage',
-      question: '这个参数，到底是做什么用的',
-      answer: '它决定下游是否把当前可行当最终结论。',
-      provider: 'deepseek',
-      model: 'deepseek-chat',
+      turns: [{
+        question: '这个参数，到底是做什么用的',
+        answer: '它决定下游是否把当前可行当最终结论。',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        createdAt: 1000,
+      }],
       createdAt: 1000,
+      updatedAt: 1000,
     })
 
     const tree = renderCard(plugin, { initialHighlightId: 'h-reopen' })

@@ -1,10 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-/** Load the browser bundle through a fake ModuleLoader, returning its test hooks. */
+import { loadBundle, makeReact } from './helpers/load-client.mjs'
+
+/** Load the browser bundle through the shared loader, returning its test hooks. */
 async function loadPlugin() {
-  let definition
-  globalThis.window = { __ModuleLoader__: { load(value) { definition = value } } }
+  globalThis.window = {
+    __ModuleLoader__: { load() {} },
+    setTimeout: (fn, delay) => setTimeout(fn, delay),
+    clearTimeout: (handle) => clearTimeout(handle),
+  }
   globalThis.document = {
     head: { appendChild() {} },
     createElement() {
@@ -12,16 +17,8 @@ async function loadPlugin() {
     },
     getSelection() { return null },
   }
-  const url = new URL('../client.js', import.meta.url)
-  await import(`${url.href}?v=${Date.now()}`)
-  assert.ok(definition, 'bundle registered itself')
-  const react = {
-    createElement: (...args) => ({ args }),
-    useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
-    useEffect: () => {},
-    useRef: () => ({ current: null }),
-  }
-  return definition.factory(() => react).__test
+  const { definition } = await loadBundle()
+  return definition.factory(() => makeReact()).__test
 }
 
 const test_ = await loadPlugin()

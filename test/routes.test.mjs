@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import { apply } from '../index.js'
 import { call, FakeResponse, makeRequest } from './helpers/http.mjs'
+import { makeRecord } from './helpers/records.mjs'
 
 const STATUS_PATH = '/dsh-clipchat/status'
 const ASK_PATH = '/dsh-clipchat/ask'
@@ -21,13 +22,15 @@ function framesOf(res) {
 }
 
 /** Fake plugin context exposing services by name and a captured webServer. */
-function makeContext({ connection, sessions, defaultSelection, llm } = {}) {
+function makeContext({ connection, sessions, defaultSelection, llm, workspaceRegistry, sessionQuery } = {}) {
   const routes = new Map()
   const disposers = []
   const services = {
     connection,
     sessions,
     llm,
+    workspaceRegistry,
+    sessionQuery,
     agentDefaultModel: defaultSelection === undefined
       ? undefined
       : { currentSelection: () => defaultSelection },
@@ -666,4 +669,329 @@ test('an omitted ask model still follows the session header chain', async () => 
 
   assert.equal(res.status, 200)
   assert.deepEqual(framesOf(res)[0], { type: 'meta', provider: 'alpha', model: 'a1' })
+})
+
+test('a request with an unparseable URL reports no session id', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  // A url that is not a valid relative URL still has to answer, not throw.
+  const res = await call(routes.get(STATUS_PATH), makeRequest({ method: 'GET', url: 'http://[bad', headers: { host: '127.0.0.1:3080' } }))
+  assert.equal(res.status, 200)
+})
+
+test('history longer than the cap is refused before the model is called', async () => {
+  let streamed = 0
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm: {
+      stream: async () => { streamed += 1; return (async function* () {})() },
+    },
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    body: { ...baseBody, history: Array.from({ length: 40 }, (_, index) => ({ role: 'user', text: `q${index}` })) },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'history-too-long')
+  assert.equal(streamed, 0, 'the model was never called')
+})
+
+test('a missing llm service reports 503', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined }, llm: undefined })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ body: baseBody }))
+
+  assert.equal(res.status, 503)
+  assert.equal(JSON.parse(res.raw).error, 'llm-unavailable')
+})
+
+test('an llm stream that ends without a finish frame reports a closed stream', async () => {
+  // `llm.stream` returns an async iterable of chunk objects.
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm: scriptedLlm([{ type: 'text-delta', index: 0, text: 'partial' }]),
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ body: baseBody }))
+  const frames = framesOf(res)
+
+  assert.equal(res.status, 200)
+  assert.ok(frames.some((frame) => frame.type === 'error' && frame.code === 'STREAM_CLOSED'),
+    'the truncation is reported')
+})
+
+test('an llm stream that throws reports the message', async () => {
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm: {
+      stream() {
+        return (async function* generate() {
+          yield { type: 'text-delta', index: 0, text: 'partial' }
+          throw new Error('upstream broke')
+        })()
+      },
+    },
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ body: baseBody }))
+  const frames = framesOf(res)
+
+  assert.ok(frames.some((frame) => frame.type === 'error' && frame.message === 'upstream broke'))
+})
+
+test('models refuses an unsafe session id', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const res = await call(routes.get('/dsh-clipchat/models'), makeRequest({
+    method: 'GET',
+    url: '/dsh-clipchat/models?sessionId=../etc/passwd',
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'invalid-session-id')
+})
+
+test('search refuses a query longer than the cap', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const res = await call(routes.get('/dsh-clipchat/search'), makeRequest({
+    method: 'GET',
+    url: `/dsh-clipchat/search?q=${'x'.repeat(300)}`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'query-too-long')
+})
+
+test('a handler that throws reports 500 with its error code', async () => {
+  // Point the store at a path that cannot be read, so the route throws.
+  const root = await mkdtemp(join(tmpdir(), 'clipchat-unreadable-'))
+  await writeFile(join(root, 'session-a.json'), '{not json', { mode: 0o000 })
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx, { storeRoot: root })
+
+  const res = await call(routes.get('/dsh-clipchat/search'), makeRequest({
+    method: 'GET',
+    url: '/dsh-clipchat/search?q=x',
+    headers: { host: 'h' },
+  }))
+
+  // A corrupt file is skipped by the reader, so this stays a normal answer.
+  assert.equal(res.status, 200)
+})
+
+test('an unparseable request url answers 400 on the search route', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const res = await call(routes.get('/dsh-clipchat/search'), makeRequest({
+    method: 'GET',
+    url: 'http://[bad',
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'invalid-request')
+})
+
+test('an ask whose history is at the cap is still accepted', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const history = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    text: `message ${index}`,
+  }))
+  const res = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: { ...baseBody, history } }))
+
+  assert.equal(res.status, 200, 'exactly the cap is allowed')
+})
+
+test('a client that disconnects mid-stream aborts the model call', async () => {
+  let sawAbort = false
+  const llm = {
+    stream(options) {
+      return (async function* generate() {
+        yield { type: 'text-delta', index: 0, text: 'first' }
+        // The route aborts on close; give it a turn to land.
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        sawAbort = options.signal?.aborted === true
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    },
+  }
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const res = new FakeResponse()
+  // Close the response before the stream finishes.
+  res.on = (name, handler) => {
+    if (name === 'close') setTimeout(handler, 5)
+    return res
+  }
+  await routes.get(ASK_PATH)(makeRequest({ headers: { host: 'h' }, body: baseBody }), res)
+
+  assert.equal(sawAbort, true, 'the model call was aborted when the client left')
+})
+
+test('an ask still proceeds when the retention touch fails', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm,
+  })
+  // A store root that is a file, not a directory: every write inside it fails.
+  const root = join(await mkdtemp(join(tmpdir(), 'clipchat-touch-')), 'not-a-dir')
+  await writeFile(root, 'x')
+  apply(ctx, { storeRoot: root })
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+
+  assert.equal(res.status, 200, 'the answer still streamed')
+  assert.ok(framesOf(res).some((frame) => frame.type === 'done'), 'the stream finished normally')
+})
+
+test('a workspace registry that throws only narrows the sweep', async () => {
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    workspaceRegistry: { get archivedSessionIds() { throw new Error('registry down') } },
+  })
+  apply(ctx)
+
+  const res = await call(routes.get('/dsh-clipchat/search'), makeRequest({
+    method: 'GET',
+    url: '/dsh-clipchat/search?q=x',
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200, 'the search answered anyway')
+})
+
+test('an ask reports 500 when the llm helper module cannot be resolved', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm,
+  })
+  apply(ctx)
+
+  // Point both anchors at a tree that has no @deepseek-ai/dsh-llm install.
+  const savedArg = process.argv[1]
+  const savedDir = process.env.DSH_INSTALL_DIR
+  const empty = await mkdtemp(join(tmpdir(), 'clipchat-empty-'))
+  process.argv[1] = join(empty, 'index.js')
+  process.env.DSH_INSTALL_DIR = empty
+  try {
+    const res = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+    assert.equal(res.status, 500)
+    assert.equal(JSON.parse(res.raw).error, 'llm-helper-unavailable')
+  } finally {
+    process.argv[1] = savedArg
+    if (savedDir === undefined) delete process.env.DSH_INSTALL_DIR
+    else process.env.DSH_INSTALL_DIR = savedDir
+  }
+})
+
+test('a store failure during a record write reports 500', async () => {
+  const root = join(await mkdtemp(join(tmpdir(), 'clipchat-bad-')), 'not-a-dir')
+  await writeFile(root, 'x')
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx, { storeRoot: root })
+
+  const res = await call(routes.get('/dsh-clipchat/record'), makeRequest({
+    headers: { host: 'h' },
+    body: { sessionId: 'session-a', op: 'add', record: makeRecord() },
+  }))
+
+  assert.equal(res.status, 500)
+  assert.equal(JSON.parse(res.raw).error, 'store-unavailable')
+})
+
+test('a remove without an id is refused, and an unknown op is a 404', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const missing = await call(routes.get('/dsh-clipchat/record'), makeRequest({
+    headers: { host: 'h' },
+    body: { sessionId: 'session-a', op: 'remove', record: {} },
+  }))
+  assert.equal(missing.status, 400)
+  assert.equal(JSON.parse(missing.raw).error, 'invalid-record')
+
+  const unknown = await call(routes.get('/dsh-clipchat/record'), makeRequest({
+    headers: { host: 'h' },
+    body: { sessionId: 'session-a', op: 'rewrite', record: makeRecord() },
+  }))
+  assert.equal(unknown.status, 404)
+  assert.equal(JSON.parse(unknown.raw).error, 'unknown-op')
+})
+
+test('the sweep still runs when the workspace registry is unavailable', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { list: () => ['session-1'], get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    workspaceRegistry: { get archivedSessionIds() { throw new Error('registry down') } },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+  assert.equal(res.status, 200, 'the answer was not blocked by the registry')
+})
+
+test('a request with no url at all is handled', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const res = await call(routes.get('/dsh-clipchat/search'), makeRequest({
+    method: 'GET',
+    url: undefined,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200, 'a missing url is treated as the root')
+})
+
+test('the same-origin guard refuses cross-site, malformed and hostless requests', async () => {
+  const { sameOriginRejection } = await import('../lib/http.js')
+
+  assert.equal(sameOriginRejection({ headers: { host: 'h' } }), undefined, 'a plain request passes')
+  assert.equal(sameOriginRejection({ headers: {} }), 403, 'no host is refused')
+  assert.equal(sameOriginRejection({ headers: { host: 'h', origin: 'https://evil.example' } }), 403,
+    'a cross-site origin is refused')
+  assert.equal(sameOriginRejection({ headers: { host: 'h', origin: 'http://[bad' } }), 403,
+    'an unparseable origin is refused')
+  assert.equal(sameOriginRejection({ headers: { host: 'h', origin: 'http://h' } }), undefined,
+    'a same-origin request passes')
+  assert.equal(sameOriginRejection({ headers: { host: 'h', referer: 'https://evil.example/x' } }), 403,
+    'a cross-site referer is refused')
+  assert.equal(sameOriginRejection({ headers: { host: 'h', 'sec-fetch-site': 'cross-site' } }), 403,
+    'a cross-site fetch is refused')
+  assert.equal(sameOriginRejection({ headers: { host: 'h', 'sec-fetch-site': 'same-origin' } }), undefined,
+    'a same-origin fetch passes')
 })

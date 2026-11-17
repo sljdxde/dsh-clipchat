@@ -52,7 +52,7 @@ test('threadTurns keeps the recalled record, completed pairs and the in-flight t
       { role: 'user', text: 'q2' },
     ],
     { question: 'q3', answer: 'partial', streaming: true, error: '' },
-    { question: 'old q', answer: 'old a' },
+    { turns: [{ question: 'old q', answer: 'old a' }] },
   )
   assert.deepEqual(turns.map((turn) => [turn.question, turn.answer]), [
     ['old q', 'old a'],
@@ -66,9 +66,17 @@ test('threadTurns keeps the recalled record, completed pairs and the in-flight t
 test('threadTurns shows the recalled record alone before any new question', async () => {
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
-  const turns = plugin.__test.threadTurns([], null, { question: 'old q', answer: 'old a' })
+  const turns = plugin.__test.threadTurns([], null, { turns: [{ question: 'old q', answer: 'old a' }] })
   assert.deepEqual(turns, [{ question: 'old q', answer: 'old a', streaming: false, error: '' }])
   assert.deepEqual(plugin.__test.threadTurns([], null, null), [])
+  // Every turn of a multi-question record shows, oldest first.
+  const many = plugin.__test.threadTurns([], null, {
+    turns: [
+      { question: 'q1', answer: 'a1' },
+      { question: 'q2', answer: 'a2' },
+    ],
+  })
+  assert.deepEqual(many.map((turn) => [turn.question, turn.answer]), [['q1', 'a1'], ['q2', 'a2']])
 })
 
 test('recordToggleLabel offers 留痕 until an answer is kept, then 取消留痕', async () => {
