@@ -167,17 +167,17 @@ window.__ModuleLoader__.load({
 .clipchat-card__preset{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-secondary,#666);border-radius:999px;padding:4px 11px;font:var(--dsw-font-xs-13);line-height:1.4;cursor:pointer;transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease}
 .clipchat-card__preset:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover);transform:translateY(-1px)}
 .clipchat-card__preset:disabled{opacity:.5;cursor:default}
-.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:4px 16px 10px}
+.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:12px 16px 12px}
 .clipchat-card__empty{display:flex;gap:10px;padding:18px 2px 10px}
 .clipchat-card__empty-mark{flex:none;font-size:26px;line-height:1;color:var(--dsw-alias-brand-primary,#2f6fed);opacity:.35}
 .clipchat-card__empty-text{display:flex;flex-direction:column;gap:3px;min-width:0}
 .clipchat-card__empty-title{font-size:13px;line-height:1.6}
 .clipchat-card__empty-sub{font-size:12px;line-height:1.5;opacity:.55}
-.clipchat-card__turn{position:relative;padding:12px 0 14px 14px;border-bottom:1px dashed var(--dsw-alias-border-l3)}
-.clipchat-card__turn:last-child{border-bottom:0}
-.clipchat-card__turn::before{content:'';position:absolute;left:0;top:16px;bottom:14px;width:2px;border-radius:2px;background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 26%, transparent)}
-.clipchat-card__q{font-size:12.5px;font-weight:600;line-height:1.5;margin-bottom:6px;white-space:pre-wrap}
-.clipchat-card__a{white-space:pre-wrap;line-height:1.7;font-size:13.5px;word-break:break-word}
+.clipchat-card__turn{padding:2px 0 18px}
+.clipchat-card__turn+.clipchat-card__turn{border-top:1px solid var(--dsw-alias-border-l3);padding-top:16px}
+.clipchat-card__q{display:flex;gap:7px;align-items:baseline;font-size:12.5px;font-weight:600;line-height:1.55;white-space:pre-wrap;margin-bottom:10px;padding:7px 10px;border-radius:9px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-primary)}
+.clipchat-card__q::before{content:'问';flex:none;font-size:10.5px;font-weight:500;line-height:1.9;opacity:.45}
+.clipchat-card__a{position:relative;white-space:pre-wrap;line-height:1.75;font-size:13.5px;word-break:break-word;padding-left:14px;border-left:2px solid color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 30%, transparent)}
 .clipchat-card__a code{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12.5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12));border-radius:4px;padding:1px 4px}
 .clipchat-card__turn-actions{display:flex;gap:6px;margin-top:6px;justify-content:flex-end}
 .clipchat-card__copy{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11px;line-height:1.4;cursor:pointer;border-radius:999px;padding:1px 8px;transition:background .12s ease,color .12s ease}
@@ -1846,6 +1846,7 @@ window.__ModuleLoader__.load({
         const requestId = ++requestIdRef.current
 
         setAsked(question)
+        setDraft('')
         setStreaming(true)
         setAnswer('')
         setError('')

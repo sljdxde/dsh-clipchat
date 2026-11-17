@@ -137,3 +137,63 @@ test('the kept-answer panel stays closed until the footer button opens it', asyn
   }
   assert.equal(hasPanel(renderCard(plugin)).found, false, 'a fresh card shows the thread, not the list')
 })
+
+/** React stub that records every state setter call, keyed by the state's init. */
+function makeRecordingReact() {
+  const log = []
+  return {
+    log,
+    createElement: (...args) => ({ args }),
+    useState: (init) => {
+      const entry = { init, calls: [] }
+      log.push(entry)
+      let value = typeof init === 'function' ? init() : init
+      return [value, (next) => {
+        value = typeof next === 'function' ? next(value) : next
+        entry.calls.push(value)
+      }]
+    },
+    useEffect: () => {},
+    useRef: () => ({ current: null }),
+    Fragment: 'Fragment',
+  }
+}
+
+/** Every rendered element of one tag, depth-first. */
+function elementsOf(node, tag, out = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) elementsOf(child, tag, out)
+    return out
+  }
+  if (node === null || typeof node !== 'object' || !Array.isArray(node.args)) return out
+  if (node.args[0] === tag) out.push(node)
+  elementsOf(node.args.slice(2), tag, out)
+  return out
+}
+
+test('sending a question empties the composer for the next one', async () => {
+  const { definition } = await loadBundle()
+  const react = makeRecordingReact()
+  const plugin = definition.factory(() => react)
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({ error: 'test' }) })
+  try {
+    const tree = renderCard(plugin)
+    const textarea = elementsOf(tree, 'textarea')
+      .find((node) => node.args[1]?.className === 'clipchat-card__ta')
+    assert.ok(textarea, 'the composer renders a textarea')
+
+    // Type, then send through a preset: the preset carries its own question, so
+    // the harness needs no re-render for the draft to be current.
+    textarea.args[1].onChange({ target: { value: '这个参数是干什么的' } })
+    const draft = react.log.find((entry) => entry.calls[0] === '这个参数是干什么的')
+    assert.ok(draft, 'typing must update the draft state')
+
+    const preset = buttonsOf(tree).filter((button) => button.args[1]?.className === 'clipchat-card__preset')[0]
+    preset.args[1].onClick()
+
+    assert.equal(draft.calls[draft.calls.length - 1], '', 'sending must clear the draft')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
