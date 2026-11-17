@@ -70,3 +70,39 @@ test('threadTurns shows the recalled record alone before any new question', asyn
   assert.deepEqual(turns, [{ question: 'old q', answer: 'old a', streaming: false, error: '' }])
   assert.deepEqual(plugin.__test.threadTurns([], null, null), [])
 })
+
+test('recordToggleLabel offers 留痕 until an answer is kept, then 取消留痕', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const translate = (key) => `T:${key}`
+  assert.equal(plugin.__test.recordToggleLabel(null, translate), 'T:record')
+  assert.equal(plugin.__test.recordToggleLabel('r1', translate), 'T:unrecord')
+})
+
+test('insertPayloadOf never starts or ends with a newline', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const payload = plugin.__test.insertPayloadOf('passage', 'why?', 'because')
+  assert.ok(payload.text.startsWith('〔滑词〕'), 'summary text starts with the marker')
+  assert.equal(payload.text, payload.text.trim())
+  assert.ok(payload.plain.startsWith('> passage'), 'plain fallback starts with the quote')
+  assert.equal(payload.plain, payload.plain.trim())
+  assert.equal(plugin.__test.insertPayloadOf('passage', 'why?', ''), null)
+})
+
+test('removing a highlight also targets the records kept for that passage', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const entries = [
+    { id: 'r1', highlightId: 'h1', selection: 'same passage' },
+    { id: 'r2', selection: 'same passage' },
+    { id: 'r3', highlightId: 'h1', selection: 'other' },
+    { id: 'r4', highlightId: 'h2', selection: 'elsewhere' },
+    { id: '', selection: 'same passage' },
+    null,
+  ]
+  assert.deepEqual(plugin.__test.recordIdsOfHighlight(entries, 'h1', 'same passage'), ['r1', 'r2', 'r3'])
+  assert.deepEqual(plugin.__test.recordIdsOfHighlight(entries, null, 'same passage'), ['r1', 'r2'])
+  assert.deepEqual(plugin.__test.recordIdsOfHighlight([], 'h1', 'x'), [])
+  assert.deepEqual(plugin.__test.recordIdsOfHighlight(undefined, 'h1', 'x'), [])
+})

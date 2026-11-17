@@ -47,7 +47,8 @@ window.__ModuleLoader__.load({
       followModel: '跟随主会话',
       invalidModel: '所选模型不可用，请换一个',
       record: '留痕',
-      recorded: '已留痕',
+      unrecord: '取消留痕',
+      unrecordHint: '已留痕，点击取消',
       records: '留痕',
       backToMain: '带回主线',
       inserted: '已插入',
@@ -109,7 +110,8 @@ window.__ModuleLoader__.load({
       followModel: 'Follow main session',
       invalidModel: 'That model is not available. Pick another.',
       record: 'Keep',
-      recorded: 'Kept',
+      unrecord: 'Un-keep',
+      unrecordHint: 'Kept. Click to remove.',
       records: 'Kept',
       backToMain: 'Send to main',
       inserted: 'Inserted',
@@ -1060,16 +1062,39 @@ window.__ModuleLoader__.load({
       return text.length <= limit ? text : `${text.slice(0, limit)}…`
     }
 
-    /** One-line summary of a Q&A for the main composer, capped at 200 chars. */
+    /**
+     * One-line summary of a Q&A for the main composer, capped at 200 chars.
+     * Newlines are folded to spaces: the composer already separates blocks, and
+     * an inserted line break reads as an accidental blank line.
+     */
     function summarizeAnswer(question, answer, limit = 200) {
-      const q = typeof question === 'string' ? question.trim() : ''
-      const a = typeof answer === 'string' ? answer.trim() : ''
+      const oneLine = (value) => value.replace(/\s*\n+\s*/gu, ' ').trim()
+      const q = typeof question === 'string' ? oneLine(question) : ''
+      const a = typeof answer === 'string' ? oneLine(answer) : ''
       if (a.length === 0) return ''
-      const prefix = q.length > 0 ? `问题：${q}\n` : ''
+      const prefix = q.length > 0 ? `问题：${q} ` : ''
       const full = `${prefix}回答：${a}`
       if (full.length <= limit) return full
       const room = Math.max(0, limit - prefix.length - '回答：'.length - 1)
       return `${prefix}回答：${a.slice(0, room)}…`
+    }
+
+    /**
+     * Payload for inserting a passage quote plus its Q&A summary into the main
+     * composer. The text never starts or ends with a newline: the composer
+     * already provides the separation, and a leading blank line reads as a bug.
+     * @param {string} passage - quoted text.
+     * @param {string} question - the question to summarise.
+     * @param {string} answer - the answer to summarise.
+     * @returns {{ text: string, plain: string } | null} payload, or null when empty.
+     */
+    function insertPayloadOf(passage, question, answer) {
+      const summary = summarizeAnswer(question, answer)
+      if (summary.length === 0) return null
+      return {
+        text: `〔滑词〕${summary}`.trim(),
+        plain: `> ${passage}\n\n〔滑词〕${summary}`.trim(),
+      }
     }
 
     /** Build one visible thread turn from its parts. */
@@ -1080,6 +1105,40 @@ window.__ModuleLoader__.load({
         streaming: options.streaming === true,
         error: typeof options.error === 'string' ? options.error : '',
       }
+    }
+
+    /**
+     * Records that belong to one highlight: the ones saved against its id, plus
+     * any record whose selection is this exact passage (older records predate
+     * the id link). Dropping a highlight drops these too; the reverse is not
+     * true, so cancelling a single 留痕 keeps the highlight.
+     * @param {Array<{ id: string, highlightId?: string, selection?: string }>} entries - stored records.
+     * @param {string} highlightId - the highlight being removed.
+     * @param {string} selection - the passage text.
+     * @returns {string[]} record ids to remove.
+     */
+    function recordIdsOfHighlight(entries, highlightId, selection) {
+      const ids = []
+      for (const entry of Array.isArray(entries) ? entries : []) {
+        if (entry === null || typeof entry !== 'object') continue
+        if (typeof entry.id !== 'string' || entry.id.length === 0) continue
+        const byId = typeof highlightId === 'string' && entry.highlightId === highlightId
+        const bySelection = typeof selection === 'string' && selection.length > 0
+          && entry.selection === selection
+        if (byId || bySelection) ids.push(entry.id)
+      }
+      return ids
+    }
+
+    /**
+     * Label for the 留痕 toggle: an unsaved answer offers 留痕, a saved one
+     * offers 取消留痕 so the automatic save can be undone.
+     * @param {string | null} savedRecordId - id of the record saved for this answer.
+     * @param {(key: string) => string} translate - locale binder.
+     * @returns {string} button label.
+     */
+    function recordToggleLabel(savedRecordId, translate) {
+      return savedRecordId === null ? translate('record') : translate('unrecord')
     }
 
     /** Quick asks are inert while streaming or when no passage was read. */
@@ -1339,6 +1398,8 @@ window.__ModuleLoader__.load({
       const [recordsOpen, setRecordsOpen] = React.useState(false)
       const [insertState, setInsertState] = React.useState('idle')
       const [copiedTurn, setCopiedTurn] = React.useState(null)
+      // The record kept for the current answer; an answer is kept by default.
+      const [savedRecordId, setSavedRecordId] = React.useState(() => loadedRecord?.id ?? null)
       const [, bumpRecords] = React.useState(0)
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
@@ -1453,24 +1514,26 @@ window.__ModuleLoader__.load({
           const textDecoder = new TextDecoder()
           let text = ''
           let failed = false
+          let usage = null
+          let route = null
           for (;;) {
             const { value, done } = await reader.read()
             if (done === true) break
             for (const frame of decoder.push(textDecoder.decode(value, { stream: true }))) {
               if (frame.type === 'meta') {
-                const route = normalizeModelRoute({ provider: frame.provider, model: frame.model })
-                if (current() && route !== null) setMeta(route)
+                const seen = normalizeModelRoute({ provider: frame.provider, model: frame.model })
+                if (seen !== null) route = seen
+                if (current() && seen !== null) setMeta(seen)
               } else if (frame.type === 'delta' && typeof frame.text === 'string') {
                 text += frame.text
                 if (current()) setAnswer(text)
               } else if (frame.type === 'usage') {
-                const usage = frame.usage ?? frame
-                if (current()) {
-                  setTokens({
-                    input: usage.inputTokens ?? usage.input ?? 0,
-                    output: usage.outputTokens ?? usage.output ?? 0,
-                  })
+                const seen = frame.usage ?? frame
+                usage = {
+                  input: seen.inputTokens ?? seen.input ?? 0,
+                  output: seen.outputTokens ?? seen.output ?? 0,
                 }
+                if (current()) setTokens(usage)
               } else if (frame.type === 'error') {
                 failed = true
                 if (current()) setError(typeof frame.message === 'string' ? frame.message : translate('failed'))
@@ -1484,6 +1547,9 @@ window.__ModuleLoader__.load({
             setDraft('')
             setAsked(null)
             setAnswered({ question: request.question, answer: text })
+            // Keeping the answer is the default; the 留痕 button turns into its
+            // cancel affordance so a throwaway question can still be dropped.
+            setSavedRecordId(keepAnswer(request.question, text, usage, route))
             setHistory((previous) => [
               ...previous,
               { role: 'user', text: request.question },
@@ -1571,21 +1637,41 @@ window.__ModuleLoader__.load({
         void persistHighlight('add', updated, sessionId)
       }
 
-      /** Write this card's last successful answer as one 留痕 record. */
-      const saveRecord = () => {
-        if (answered === null) return
+      /**
+       * Store one answer as a 留痕 record.
+       * @param {string} question - the question that produced it.
+       * @param {string} answer - the answer text.
+       * @param {{ input: number, output: number } | null} usage - token usage, when reported.
+       * @param {{ provider: string, model: string } | null} route - the route that answered.
+       * @returns {string | null} the stored record id.
+       */
+      const keepAnswer = (question, answer, usage, route) => {
         const entry = buildRecord({
           highlightId: highlightIdOf(nodeKey, selection) ?? undefined,
           selection,
-          question: answered.question,
-          answer: answered.answer,
-          provider: meta?.provider ?? model?.provider,
-          model: meta?.model ?? model?.model,
-          usage: tokens ?? undefined,
+          question,
+          answer,
+          provider: route?.provider ?? meta?.provider ?? model?.provider,
+          model: route?.model ?? meta?.model ?? model?.model,
+          usage: usage ?? tokens ?? undefined,
         })
-        if (entry === null) return
+        if (entry === null) return null
         addRecord(entry, sessionId)
         bumpRecords((value) => value + 1)
+        return entry.id
+      }
+
+      /** Keep the current answer, or drop the record it was kept as. */
+      const toggleRecord = () => {
+        if (savedRecordId !== null) {
+          if (removeRecord(savedRecordId, sessionId)) {
+            setSavedRecordId(null)
+            bumpRecords((value) => value + 1)
+          }
+          return
+        }
+        if (answered === null) return
+        setSavedRecordId(keepAnswer(answered.question, answered.answer, tokens, meta))
       }
 
       /**
@@ -1596,10 +1682,9 @@ window.__ModuleLoader__.load({
        * @param {string} answer - the answer to summarise.
        */
       const insertIntoMain = (passage, question, answer) => {
-        const summary = summarizeAnswer(question, answer)
-        if (summary.length === 0) return
-        const text = `\n\n〔滑词〕${summary}`
-        const plain = `> ${passage}${text}`
+        const payload = insertPayloadOf(passage, question, answer)
+        if (payload === null) return
+        const { text, plain } = payload
         try {
           let ok = false
           if (typeof inputActions?.insertQuote === 'function'
@@ -1676,11 +1761,6 @@ window.__ModuleLoader__.load({
         ? translate('followModel')
         : currentChoice?.name ?? model?.model ?? currentModelKey
       const recordEntries = recordList()
-      const alreadyRecorded = answered !== null && recordEntries.some((entry) => (
-        entry.selection === selection
-        && entry.question === answered.question
-        && entry.answer === answered.answer
-      ))
       const currentTurn = asked === null ? null : turnOf(asked, answer, { streaming, error })
       const turns = threadTurns(history, currentTurn, loadedRecord)
       const presetEntries = presetList(translate)
@@ -1909,6 +1989,14 @@ window.__ModuleLoader__.load({
             onClick: () => {
               if (highlighted) {
                 const id = highlightIdOf(nodeKey, selection)
+                // Removing the highlight also removes the answers kept for this
+                // passage: an unmarked passage should not keep a record behind.
+                const dropped = recordIdsOfHighlight(recordList(), id, selection)
+                for (const recordId of dropped) removeRecord(recordId, sessionId)
+                if (dropped.length > 0) {
+                  setSavedRecordId((current) => (current !== null && dropped.includes(current) ? null : current))
+                  bumpRecords((value) => value + 1)
+                }
                 if (id === null) {
                   setHighlighted(false)
                   return
@@ -1924,10 +2012,12 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'clipchat-actions__btn',
-            disabled: streaming || answered === null || alreadyRecorded,
+            'aria-pressed': savedRecordId !== null,
+            title: savedRecordId === null ? undefined : translate('unrecordHint'),
+            disabled: streaming || (answered === null && savedRecordId === null),
             onMouseDown: (event) => event.preventDefault(),
-            onClick: saveRecord,
-          }, alreadyRecorded ? translate('recorded') : translate('record')),
+            onClick: toggleRecord,
+          }, recordToggleLabel(savedRecordId, translate)),
           h('button', {
             type: 'button',
             className: 'clipchat-actions__btn',
@@ -2055,12 +2145,15 @@ window.__ModuleLoader__.load({
         anchorFromSelection,
         resolvedSpanAt,
         summarizeAnswer,
+        insertPayloadOf,
         presetList,
         inlineParts,
         threadTurns,
         turnOf,
         presetDisabled,
         askHighlightId,
+        recordToggleLabel,
+        recordIdsOfHighlight,
         searchKeyOf,
         dateTextOf,
         ClipNotice,
