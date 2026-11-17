@@ -814,15 +814,65 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Turn number encoded in a chat node key (`14:assistant-step22:51` → 14).
+     * Turn number encoded in a chat node key.
+     *
+     * `14:assistant-step22:51` belongs to turn 22, not 14: the leading segment
+     * is a sequence and the `assistant-stepN` segment is the turn. Parsing the
+     * step number works even when the node is not mounted, which the DOM lookup
+     * cannot do, so this is the fallback that makes old highlights locatable.
+     *
      * @param {unknown} nodeKey - chat node key.
-     * @returns {number | null} the turn, or null when the key has no prefix.
+     * @returns {number | null} the turn, or null when the key has no turn.
      */
     function turnOfNodeKey(nodeKey) {
       if (typeof nodeKey !== 'string') return null
-      const head = nodeKey.slice(0, nodeKey.indexOf(':'))
-      const turn = Number.parseInt(head, 10)
+      const step = /assistant-step(\d+)/u.exec(nodeKey)
+      const raw = step === null ? nodeKey.slice(0, nodeKey.indexOf(':')) : step[1]
+      const turn = Number.parseInt(raw, 10)
       return Number.isInteger(turn) && turn > 0 ? turn : null
+    }
+
+    /**
+     * Turn number a mounted chat node belongs to.
+     *
+     * The host stamps `data-chat-turn` on the wrapper around a step, which is
+     * the only reliable source: the node key prefix is a sequence and the
+     * `assistant-stepN` segment is the step, not the turn.
+     *
+     * @param {string} nodeKey - chat node key.
+     * @returns {number | null} the turn, or null when the node is not mounted.
+     */
+    function turnOfNode(nodeKey) {
+      if (typeof document === 'undefined' || typeof nodeKey !== 'string') return null
+      for (const node of nodesFor(nodeKey)) {
+        const owner = node.closest('[data-chat-turn]')
+        const turn = Number.parseInt(owner?.getAttribute('data-chat-turn') ?? '', 10)
+        if (Number.isInteger(turn) && turn > 0) return turn
+      }
+      return null
+    }
+
+    /**
+     * Turn number of the first mounted assistant passage that contains `text`.
+     *
+     * Anchors survive a reload by key, but a rebuilt chat can hand the same
+     * passage a different key. Matching the text is the last resort before
+     * giving up, and it keeps old highlights locatable.
+     *
+     * @param {string} text - passage text.
+     * @returns {number | null} the turn, or null when no mounted node matches.
+     */
+    function turnOfText(text) {
+      if (typeof document === 'undefined' || typeof text !== 'string' || text.length === 0) return null
+      const needle = text.slice(0, 32)
+      for (const node of document.querySelectorAll('[data-chat-node-key]')) {
+        if (!/assistant-step/u.test(node.getAttribute('data-chat-node-key') ?? '')) continue
+        const source = node.querySelector('[data-text-interaction-source]')
+        if (source === null || !(source.textContent ?? '').includes(needle)) continue
+        const turn = Number.parseInt(node.closest('[data-chat-turn]')?.getAttribute('data-chat-turn') ?? '', 10)
+        if (Number.isInteger(turn) && turn > 0) return turn
+      }
+      return null
     }
 
     /**
@@ -877,30 +927,54 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Keep a highlight centred for a short while.
+     *
+     * The chat list is virtualised and re-runs its own scroll correction for a
+     * few frames after a jump, so a single `scrollTop` write can be reverted.
+     * Re-applying the correction until it sticks is what makes the jump feel
+     * reliable; the loop stops as soon as the target is already centred.
+     *
+     * @param {() => Element[]} linesOf - current underline elements.
+     * @param {number} until - timestamp to stop at.
+     * @returns {void}
+     */
+    function holdCentred(linesOf, until) {
+      const scroller = document.querySelector('[data-conversation-scroll]')
+      if (scroller === null || scroller === undefined) return
+      const step = () => {
+        const lines = linesOf()
+        const line = lines[0]
+        if (line !== undefined) {
+          const box = line.getBoundingClientRect()
+          const view = scroller.getBoundingClientRect()
+          if (box.height > 0) {
+            const delta = box.top - view.top - (scroller.clientHeight - box.height) / 2
+            if (Number.isFinite(delta) && Math.abs(delta) > 2) scroller.scrollTop += delta
+          }
+        }
+        if (Date.now() < until) setTimeout(step, 100)
+      }
+      step()
+    }
+
+    /**
      * Bring one stored highlight into view and flash its underline.
      *
-     * The host scrolls asynchronously (and mounts the turn on demand), so the
-     * flash waits until the underline is actually inside the viewport instead
-     * of firing on a fixed delay.
+     * Order matters: jump first (the host mounts the turn on demand), wait for
+     * the underline to exist and have height, centre it, then flash. Flashing
+     * before the jump settles leaves the highlight off screen.
      *
      * @param {string} highlightId - stored highlight id.
-     * @param {number | null} [turn] - turn from the chat snapshot; the key prefix
-     *   is not the turn number, so callers that can read the snapshot pass it.
+     * @param {number | null} [turn] - turn from the chat snapshot, when known.
+     * @param {(() => void) | null} [onFail] - called when the passage never lays out.
      * @returns {boolean} whether navigation could be started.
      */
-    function revealHighlight(highlightId, turn = null) {
+    function revealHighlight(highlightId, turn = null, onFail = null) {
       if (typeof document === 'undefined' || typeof highlightId !== 'string') return false
       const anchor = highlights.get(highlightId)?.anchor
       if (anchor === null || anchor === undefined) return false
       const linesOf = () => [...document.querySelectorAll('.clipchat-layer__line')]
         .filter((line) => line.getAttribute('data-clipchat-id') === highlightId)
-      const onScreen = () => {
-        for (const line of linesOf()) {
-          const box = line.getBoundingClientRect()
-          if (box.height > 0 && box.top >= 0 && box.bottom <= window.innerHeight) return true
-        }
-        return false
-      }
       const flash = () => {
         pendingFlashId = highlightId
         for (const line of linesOf()) {
@@ -915,27 +989,38 @@ window.__ModuleLoader__.load({
         }, 1600)
       }
 
-      const target = Number.isInteger(turn) ? turn : turnOfNodeKey(anchor.nodeKey)
+      // Order: the mounted DOM (authoritative), the key itself (works while the
+      // turn is unmounted), the chat snapshot, then a text match for a node that
+      // a rebuilt chat re-keyed.
+      const target = turnOfNode(anchor.nodeKey)
+        ?? turnOfNodeKey(anchor.nodeKey)
+        ?? (Number.isInteger(turn) ? turn : null)
+        ?? turnOfText(anchor.text)
       const used = navigateToTurn(target)
-      // Nudge the passage out from under the card, if it landed there.
-      setTimeout(() => centreInColumn(linesOf()), 200)
       if (used === null) {
         const node = nodesFor(anchor.nodeKey)[0]
         if (node === undefined || typeof node.scrollIntoView !== 'function') return false
         node.scrollIntoView({ block: 'center' })
       }
 
-      // Poll briefly: the jump settles after a frame or two, and an unloaded
-      // turn needs a network round trip before its lines exist.
-      const deadline = Date.now() + (used === 'load' ? 4000 : 1600)
+      // The host scrolls (and may mount the turn) asynchronously; wait for the
+      // underline to be laid out before centring and flashing it.
+      const deadline = Date.now() + (used === 'load' ? 6000 : 3000)
       const tick = () => {
-        if (onScreen() || Date.now() > deadline) {
-          flash()
+        const lines = linesOf()
+        const laid = lines.some((line) => line.getBoundingClientRect().height > 0)
+        if (!laid && Date.now() < deadline) {
+          setTimeout(tick, 100)
           return
         }
-        setTimeout(tick, 120)
+        if (!laid) {
+          if (typeof onFail === 'function') onFail()
+          return
+        }
+        holdCentred(linesOf, Date.now() + 900)
+        setTimeout(flash, 260)
       }
-      setTimeout(tick, 80)
+      setTimeout(tick, 100)
       return true
     }
 
@@ -1889,7 +1974,7 @@ window.__ModuleLoader__.load({
         // Close first: the card is anchored to the selection, so leaving it open
         // would re-anchor it onto the passage we are about to reveal and hide it.
         dismiss()
-        revealHighlight(highlightId, nodeTurn(node) ?? null)
+        if (!revealHighlight(highlightId, nodeTurn(node) ?? null, () => setLocateFailed(true))) setLocateFailed(true)
       }
 
       const recordRow = (entry) => {
@@ -2362,6 +2447,8 @@ window.__ModuleLoader__.load({
         highlightIdOfRecord,
         revealHighlight,
         turnOfNodeKey,
+        turnOfNode,
+        turnOfText,
         hasHighlight,
         storedModelOf,
         normalizeModelRoute,

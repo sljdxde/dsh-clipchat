@@ -124,7 +124,9 @@ test('a record resolves to the highlight of its passage', async () => {
 test('a chat node key yields its turn number', async () => {
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
-  assert.equal(plugin.__test.turnOfNodeKey('14:assistant-step22:51'), 14)
+  // The step segment is the turn; the leading segment is only a sequence.
+  assert.equal(plugin.__test.turnOfNodeKey('14:assistant-step22:51'), 22)
+  assert.equal(plugin.__test.turnOfNodeKey('14:assistant-step17:65'), 17)
   assert.equal(plugin.__test.turnOfNodeKey('7:user1:0'), 7)
   assert.equal(plugin.__test.turnOfNodeKey('nope'), null)
   assert.equal(plugin.__test.turnOfNodeKey('0:x'), null)
