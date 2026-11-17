@@ -618,8 +618,9 @@ test('POST record add rejects a malformed record with 400', async () => {
     undefined,
     {},
     { id: 'r1' },
-    { ...makeRecord(), answer: '' },
-    { ...makeRecord(), usage: { input: -1, output: 0 } },
+    makeRecord('r1', { answer: '' }),
+    makeRecord('r1', { usage: { input: -1, output: 0 } }),
+    makeRecord('r1', { turns: [] }),
   ]) {
     const res = await call(routes.get(RECORD_PATH), makeRequest({
       url: RECORD_PATH,
@@ -704,9 +705,9 @@ test('registers the search route next to session, highlight and record', async (
 
 test('GET search matches across sessions and reports the total', async () => {
   const { routes, store } = await setup()
-  await store.addRecord('session-a', { ...makeRecord('r1'), question: 'needle in a', answer: 'no' })
-  await store.addRecord('session-b', { ...makeRecord('r2'), question: 'other', answer: 'contains needle' })
-  await store.addRecord('session-b', { ...makeRecord('r3'), question: 'nothing', answer: 'none' })
+  await store.addRecord('session-a', makeRecord('r1', { question: 'needle in a', answer: 'no' }))
+  await store.addRecord('session-b', makeRecord('r2', { question: 'other', answer: 'contains needle' }))
+  await store.addRecord('session-b', makeRecord('r3', { question: 'nothing', answer: 'none' }))
 
   const res = await call(routes.get(SEARCH_PATH), makeRequest({
     method: 'GET',

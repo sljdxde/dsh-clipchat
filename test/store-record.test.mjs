@@ -47,12 +47,16 @@ test('addRecord persists the full record schema', async () => {
     id: 'r1',
     highlightId: 'h1',
     selection: 'passage-r1',
-    question: 'question-r1',
-    answer: 'answer-r1',
-    provider: 'deepseek',
-    model: 'deepseek-chat',
-    usage: { input: 10, output: 20 },
+    turns: [{
+      question: 'question-r1',
+      answer: 'answer-r1',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      usage: { input: 10, output: 20 },
+      createdAt: 1000,
+    }],
     createdAt: 1000,
+    updatedAt: 1000,
   }])
   assert.deepEqual(stored.highlights, [])
 })
@@ -60,20 +64,26 @@ test('addRecord persists the full record schema', async () => {
 test('addRecord omits optional fields that are absent', async () => {
   const root = await makeRoot()
   const store = createStore({ root, now: () => 2100 })
+  // Both the record and its turn fall back to the store clock.
   const entry = record('r1')
-  delete entry.usage
   delete entry.createdAt
+  delete entry.turns[0].usage
+  delete entry.turns[0].createdAt
 
   const state = await store.addRecord('session-a', entry)
 
   assert.deepEqual(state.records, [{
     id: 'r1',
     selection: 'passage-r1',
-    question: 'question-r1',
-    answer: 'answer-r1',
-    provider: 'deepseek',
-    model: 'deepseek-chat',
+    turns: [{
+      question: 'question-r1',
+      answer: 'answer-r1',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      createdAt: 2100,
+    }],
     createdAt: 2100,
+    updatedAt: 2100,
   }])
 })
 
@@ -85,7 +95,8 @@ test('addRecord upserts by id instead of duplicating', async () => {
   const state = await store.addRecord('session-a', record('r1', { answer: 'second' }))
 
   assert.equal(state.records.length, 1)
-  assert.equal(state.records[0].answer, 'second')
+  assert.equal(state.records[0].turns.length, 1)
+  assert.equal(state.records[0].turns[0].answer, 'second')
 })
 
 test('removeRecord drops only that record and persists', async () => {
@@ -134,16 +145,18 @@ test('isValidRecord accepts the client shape and rejects malformed records', () 
     'record',
     {},
     record(''),
-    { ...record('r1'), selection: '' },
-    { ...record('r1'), question: 42 },
-    { ...record('r1'), answer: undefined },
-    { ...record('r1'), provider: '' },
-    { ...record('r1'), model: 7 },
-    { ...record('r1'), usage: { input: -1, output: 2 } },
-    { ...record('r1'), usage: { input: 'x', output: 2 } },
-    { ...record('r1'), usage: { input: 1 } },
-    { ...record('r1'), createdAt: 'yesterday' },
-    { ...record('r1'), highlightId: '' },
+    record('r1', { selection: '' }),
+    record('r1', { question: 42 }),
+    record('r1', { answer: undefined }),
+    record('r1', { provider: '' }),
+    record('r1', { model: 7 }),
+    record('r1', { usage: { input: -1, output: 2 } }),
+    record('r1', { usage: { input: 'x', output: 2 } }),
+    record('r1', { usage: { input: 1 } }),
+    record('r1', { createdAt: 'yesterday' }),
+    record('r1', { highlightId: '' }),
+    record('r1', { turns: [] }),
+    record('r1', { turns: [{ question: 'q' }] }),
     { ...record('r1'), id: 'x'.repeat(201) },
   ]) {
     assert.equal(isValidRecord(invalid), false, `should reject ${JSON.stringify(invalid)}`)
@@ -266,7 +279,7 @@ test('invalid records already on disk are filtered out on read', async () => {
       record('r1'),
       { id: 'broken' },
       null,
-      { ...record('r2'), provider: '' },
+      record('r2', { provider: '' }),
       record('r3', { createdAt: undefined }),
     ],
   })
@@ -275,4 +288,43 @@ test('invalid records already on disk are filtered out on read', async () => {
   const state = await store.load('session-a')
 
   assert.deepEqual(state.records.map((entry) => entry.id), ['r1', 'r3'])
+})
+
+test('records written before the turn model merge into one per passage', async () => {
+  const root = await makeRoot()
+  // Three questions about the same highlight, written one-record-per-question.
+  await seed(root, 'session-a', {
+    records: [
+      record('r1', { highlightId: 'h1', createdAt: 100, question: 'q1', answer: 'a1' }),
+      record('r2', { highlightId: 'h1', createdAt: 200, question: 'q2', answer: 'a2' }),
+      record('r3', { highlightId: 'h1', createdAt: 300, question: 'q3', answer: 'a3' }),
+      // A different highlight that happens to cover the same words stays apart.
+      record('r4', { highlightId: 'h2', createdAt: 400 }),
+    ],
+  })
+  const store = createStore({ root, now: () => 9000 })
+
+  const state = await store.load('session-a')
+
+  assert.deepEqual(state.records.map((entry) => entry.id), ['r1', 'r4'])
+  assert.deepEqual(state.records[0].turns.map((turn) => turn.question), ['q1', 'q2', 'q3'])
+  assert.equal(state.records[0].createdAt, 100)
+  assert.equal(state.records[0].updatedAt, 300)
+})
+
+test('legacy records without a highlight merge by their passage text', async () => {
+  const root = await makeRoot()
+  await seed(root, 'session-a', {
+    records: [
+      record('r1', { selection: 'same words', createdAt: 100 }),
+      record('r2', { selection: 'same words', createdAt: 200 }),
+      record('r3', { selection: 'other words', createdAt: 300 }),
+    ],
+  })
+  const store = createStore({ root, now: () => 9000 })
+
+  const state = await store.load('session-a')
+
+  assert.deepEqual(state.records.map((entry) => entry.id), ['r1', 'r3'])
+  assert.equal(state.records[0].turns.length, 2)
 })

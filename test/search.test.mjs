@@ -46,8 +46,10 @@ test('result rows carry the owning session and route metadata', () => {
     sessionId: 'session-a',
     recordId: 'r1',
     selection: 'Alpha passage',
+    // `question`/`answer` mirror the newest turn; `turns` carries them all.
     question: 'first',
     answer: 'one',
+    turns: [{ question: 'first', answer: 'one' }],
     provider: 'deepseek',
     model: 'deepseek-chat',
     createdAt: 100,

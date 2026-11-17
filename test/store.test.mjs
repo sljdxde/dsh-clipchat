@@ -147,7 +147,21 @@ test('adding to a stored session preserves existing records', async () => {
 
   await store.addHighlight('session-a', highlight('h1'))
 
-  assert.deepEqual((await readState(root, 'session-a')).records, records)
+  // The legacy single-turn record is preserved, migrated into the `turns`
+  // shape on the way out; nothing is lost.
+  assert.deepEqual((await readState(root, 'session-a')).records, [{
+    id: 'r1',
+    selection: 's',
+    turns: [{
+      question: 'q',
+      answer: 'a',
+      provider: 'p',
+      model: 'm',
+      createdAt: 1,
+    }],
+    createdAt: 1,
+    updatedAt: 1,
+  }])
 })
 
 test('a corrupt file loads as an empty state instead of throwing', async () => {

@@ -514,7 +514,7 @@ export function apply(ctx, options = {}) {
     })
   })
 
-  /** `GET /dsh-clipchat/search`: substring search across every session's 留痕. */
+  /** `GET /dsh-clipchat/search`: substring search across every session's records. */
   const handleSearch = readRoute('search-unavailable', async (req, res) => {
     let url
     try {

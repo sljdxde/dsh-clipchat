@@ -49,20 +49,20 @@ window.__ModuleLoader__.load({
       model: '模型',
       followModel: '跟随主会话',
       invalidModel: '所选模型不可用，请换一个',
-      record: '留痕',
-      unrecord: '取消留痕',
-      unrecordHint: '已留痕，点击取消',
-      records: '留痕',
+      record: '记录',
+      unrecord: '取消记录',
+      unrecordHint: '已记录，点击取消',
+      records: '记录',
       backToMain: '带回主线',
       inserted: '已插入',
       insertFailed: '无法插入，请手动复制',
       currentSelection: '当前选段',
       deleteRecord: '删除',
-      noRecords: '本会话暂无留痕',
+      noRecords: '本会话暂无记录',
       recordsSession: '本会话',
       recordsAll: '全部会话',
-      searchPlaceholder: '搜索全部留痕…',
-      searchEmpty: '没有匹配的留痕',
+      searchPlaceholder: '搜索全部记录…',
+      searchEmpty: '没有匹配的记录',
       searchLoading: '搜索中…',
       searchFailed: '搜索失败，请重试',
       searchTruncated: '结果较多，仅显示最新部分',
@@ -94,8 +94,8 @@ window.__ModuleLoader__.load({
       ctxTools: '工具调用',
       ctxSummary: '压缩摘要',
       collapseAnswer: '收起',
-      threadHint: '问一句，这段话就会留在原文上。',
-      threadHintSub: '回答会自动留痕，不需要时点「取消留痕」。',
+      threadHint: '问一句，这段话就会记在原文上。',
+      threadHintSub: '回答会自动记录，不需要时点「取消记录」。',
       generating: '生成中…',
       presetExplain: '解释这段',
       presetExplainQ: '解释这段',
@@ -138,16 +138,16 @@ window.__ModuleLoader__.load({
       record: 'Keep',
       unrecord: 'Un-keep',
       unrecordHint: 'Kept. Click to remove.',
-      records: 'Kept',
+      records: 'Records',
       backToMain: 'Send to main',
       inserted: 'Inserted',
       insertFailed: 'Could not insert. Copy manually.',
       currentSelection: 'This passage',
       deleteRecord: 'Delete',
-      noRecords: 'No kept answers yet',
+      noRecords: 'No records yet',
       recordsSession: 'This session',
       recordsAll: 'All sessions',
-      searchPlaceholder: 'Search all kept answers…',
+      searchPlaceholder: 'Search all records…',
       searchEmpty: 'No matching kept answers',
       searchLoading: 'Searching…',
       searchFailed: 'Search failed. Try again.',
@@ -181,7 +181,7 @@ window.__ModuleLoader__.load({
       ctxSummary: 'summary',
       collapseAnswer: 'Collapse',
       threadHint: 'Ask once and the passage stays marked in the reply.',
-      threadHintSub: 'Answers are kept automatically; use 取消留痕 to drop one.',
+      threadHintSub: 'Answers are recorded automatically; use 取消记录 to drop one.',
       generating: 'Generating…',
       presetExplain: 'Explain',
       presetExplainQ: 'Explain this passage',
@@ -243,7 +243,7 @@ window.__ModuleLoader__.load({
 .clipchat-card__send{flex:none;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));font:inherit;font-size:15px;cursor:pointer;border-radius:10px;padding:0;transition:opacity .12s ease,transform .12s ease,background .12s ease}
 .clipchat-card__send:hover:not(:disabled){transform:translateY(-1px)}
 .clipchat-card__send:disabled{background:transparent;color:var(--dsw-alias-label-primary);opacity:.45;cursor:default}
-.clipchat-strip{position:relative;display:flex;align-items:center;gap:8px;margin:0 16px 2px;padding:4px 9px;height:30px;border:1px solid transparent;border-radius:8px;transition:background .16s ease,border-color .16s ease}
+.clipchat-strip{position:relative;display:flex;align-items:center;gap:7px;box-sizing:border-box;margin:0 16px 2px;padding:0 9px;height:30px;min-height:30px;line-height:1;border:1px solid transparent;border-radius:8px;transition:background .16s ease,border-color .16s ease}
 .clipchat-strip:hover{border-color:var(--dsw-alias-border-l3)}
 .clipchat-strip.is-on{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 7%, transparent);border-color:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 26%, transparent)}
 .clipchat-strip.is-degraded{background:color-mix(in srgb, #b0741c 7%, transparent);border-color:color-mix(in srgb, #b0741c 28%, transparent)}
@@ -260,6 +260,7 @@ window.__ModuleLoader__.load({
 .clipchat-strip.is-on .clipchat-strip__readout{color:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip.is-degraded .clipchat-strip__readout{color:#b0741c}
 .clipchat-strip__more{flex:none;margin-left:auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:10.5px;line-height:1;padding:3px 4px;border-radius:5px;cursor:pointer;opacity:.75;transition:opacity .12s ease,background .12s ease}
+.clipchat-strip__label,.clipchat-strip__readout,.clipchat-strip__sep{line-height:1}
 .clipchat-strip__more:hover{opacity:1;background:var(--dsw-alias-button-floating-hover)}
 .clipchat-strip__detail{position:absolute;left:0;bottom:calc(100% + 5px);z-index:4;width:262px;padding:7px 9px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));border:1px solid var(--dsw-alias-border-l3);border-radius:8px;box-shadow:var(--dsw-elevation-panel);opacity:0;transform:translateY(3px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
 .clipchat-strip:hover .clipchat-strip__detail,.clipchat-strip:focus-within .clipchat-strip__detail,.clipchat-strip__detail.is-pinned{opacity:1;transform:none;pointer-events:auto}
@@ -275,21 +276,23 @@ window.__ModuleLoader__.load({
 .clipchat-strip.is-on .clipchat-strip__foot b{color:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip.is-degraded .clipchat-strip__foot b{color:#b0741c}
 @media (prefers-reduced-motion:reduce){.clipchat-strip__detail{transition:none}}
-.clipchat-card__footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 16px 12px}
-.clipchat-card__modelwrap{position:relative}
-.clipchat-card__modelbtn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s ease,color .12s ease}
+.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;padding:0 16px 12px;min-width:0}
+.clipchat-card__footer>*{flex:none}
+.clipchat-card__footer .clipchat-card__spacer{flex:1 1 0;min-width:4px}
+.clipchat-card__modelwrap{position:relative;flex:0 1 auto;min-width:0;display:flex}
+.clipchat-card__modelbtn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s ease,color .12s ease}
 .clipchat-card__modelbtn:hover{background:var(--dsw-alias-button-floating-hover);color:var(--dsw-alias-label-primary)}
 .clipchat-card__modelmenu{position:absolute;left:0;bottom:calc(100% + 6px);z-index:3;min-width:200px;max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:5px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));border:1px solid var(--dsw-alias-border-l3);border-radius:10px;box-shadow:var(--dsw-elevation-panel)}
 .clipchat-card__modelitem{flex:none;border:none;background:transparent;color:inherit;font:var(--dsw-font-xs-13);text-align:left;padding:7px 9px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .12s ease,color .12s ease}
 .clipchat-card__modelitem:hover{background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card__modelitem.on{color:var(--dsw-alias-brand-primary,#2f6fed);background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 10%, transparent);font-weight:600}
-.clipchat-card__spacer{flex:1}
-.clipchat-card__tokens{font-size:11.5px;opacity:.55;font-variant-numeric:tabular-nums;white-space:nowrap}
+.clipchat-card__spacer{flex:1 1 auto;min-width:0}
+.clipchat-card__tokens{flex:0 1 auto;min-width:0;font-size:11px;opacity:.55;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .clipchat-card__error{color:#d9544d;font-size:12px;white-space:pre-wrap}
 .clipchat-card__hint{opacity:.6;font-size:12px;line-height:1.5}
 .clipchat-card__notice{padding:10px 12px 12px;opacity:.7;font-size:12px}
 .clipchat-card__note{padding:0 16px 10px}
-.clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:12px;cursor:pointer;border-radius:999px;padding:4px 10px;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;white-space:nowrap;transition:background .12s ease,color .12s ease,border-color .12s ease}
 .clipchat-actions__btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
 .clipchat-actions__btn[aria-pressed='true']{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12))}
 .clipchat-actions__btn:disabled{opacity:.5;cursor:default}
@@ -301,7 +304,9 @@ window.__ModuleLoader__.load({
 .clipchat-card__record-head{display:flex;align-items:center;gap:6px}
 .clipchat-card__record-selection{flex:1;min-width:0;opacity:.75;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clipchat-card__tag{font-size:10px;border-radius:999px;padding:1px 6px;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 18%, transparent);white-space:nowrap}
-.clipchat-card__record-body{display:flex;flex-direction:column;gap:4px;border:none;background:transparent;color:inherit;font:inherit;text-align:left;padding:0;cursor:pointer;width:100%}
+.clipchat-card__record-body{display:flex;flex-direction:column;gap:8px;border:none;background:transparent;color:inherit;font:inherit;text-align:left;padding:0;cursor:pointer;width:100%}
+.clipchat-card__record-turn{display:flex;flex-direction:column;gap:4px}
+.clipchat-card__record-turn+.clipchat-card__record-turn{padding-top:8px;border-top:1px dashed var(--dsw-alias-border-l3)}
 .clipchat-card__record-q{font-size:12.5px;font-weight:600;line-height:1.5;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .clipchat-card__record-a{font-size:12.5px;line-height:1.6;opacity:.75;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3}
 .clipchat-card__record.is-open .clipchat-card__record-q,.clipchat-card__record.is-open .clipchat-card__record-a{display:block;-webkit-line-clamp:unset;line-clamp:unset;overflow:visible}
@@ -468,7 +473,7 @@ window.__ModuleLoader__.load({
     let pendingFlashId = null
     let nextHighlightId = 1
 
-    /** Stored 留痕 records of the loaded session, keyed by id. */
+    /** Stored records of the loaded session, keyed by id. */
     const records = new Map()
     let nextRecordId = 1
     let loadedSessionId = null
@@ -614,35 +619,98 @@ window.__ModuleLoader__.load({
       return { input, output }
     }
 
-    /**
-     * Build one persisted 留痕 record, or null when the answer is incomplete.
-     *
-     * A record is only written when a question, an answer and the answering
-     * route are all known; `usage` and `highlightId` are optional.
-     * @param {object} input - card state captured when the user clicks 留痕.
-     * @returns {object | null} the record, or null when it cannot be stored.
-     */
-    function buildRecord(input) {
+    /** Validate one stored turn, keeping only the fields worth persisting. */
+    function normalizeTurn(input) {
       if (input === null || typeof input !== 'object') return null
-      if (!isRecordText(input.selection) || input.selection.length > 4000) return null
       if (!isRecordText(input.question) || input.question.length > 20000) return null
       if (!isRecordText(input.answer) || input.answer.length > 512 * 1024) return null
       if (!isRecordText(input.provider) || !isRecordText(input.model)) return null
+      // A present but non-numeric timestamp is a caller mistake, not a default.
       if (input.createdAt !== undefined && !Number.isFinite(input.createdAt)) return null
       const usage = input.usage === undefined ? null : normalizeUsage(input.usage)
       if (input.usage !== undefined && usage === null) return null
-      const entry = {
-        id: isRecordText(input.id) ? input.id : newRecordId(),
-        selection: input.selection,
+      const turn = {
         question: input.question,
         answer: input.answer,
         provider: input.provider,
         model: input.model,
         createdAt: Number.isFinite(input.createdAt) ? input.createdAt : Date.now(),
       }
+      if (usage !== null) turn.usage = usage
+      return turn
+    }
+
+    /**
+     * Build one persisted record, or null when the shape is unusable.
+     *
+     * A record belongs to one highlight and holds every question asked about
+     * it, so `turns` is the canonical field. A legacy entry that still carries
+     * a top-level question/answer is folded into a single turn.
+     *
+     * @param {object} input - stored entry or freshly assembled record.
+     * @returns {object | null} the record, or null when it cannot be stored.
+     */
+    function buildRecord(input) {
+      if (input === null || typeof input !== 'object') return null
+      if (!isRecordText(input.selection) || input.selection.length > 4000) return null
+
+      const source = Array.isArray(input.turns) ? input.turns : [input]
+      const turns = []
+      for (const raw of source) {
+        const turn = normalizeTurn(raw)
+        if (turn === null) return null
+        turns.push(turn)
+      }
+      if (turns.length === 0) return null
+
+      const first = turns[0].createdAt
+      const last = turns.reduce((newest, turn) => Math.max(newest, turn.createdAt), first)
+      const entry = {
+        id: isRecordText(input.id) ? input.id : newRecordId(),
+        selection: input.selection,
+        turns,
+        createdAt: first,
+        updatedAt: last,
+      }
       if (isRecordText(input.highlightId)) entry.highlightId = input.highlightId
-      if (usage !== null) entry.usage = usage
       return entry
+    }
+
+    /**
+     * Append one turn to a record, or start a new one.
+     *
+     * The record is keyed by its highlight, so asking twice about the same
+     * passage updates one record instead of adding a second.
+     *
+     * @param {object | null} existing - the record already stored for this highlight.
+     * @param {object} turn - validated turn.
+     * @param {string} selection - the passage text.
+     * @param {string} [highlightId] - the highlight this record belongs to.
+     * @returns {object | null} the record to persist.
+     */
+    function recordWithTurn(existing, turn, selection, highlightId) {
+      const turns = Array.isArray(existing?.turns) ? [...existing.turns, turn] : [turn]
+      return buildRecord({
+        id: existing?.id,
+        highlightId: highlightId ?? existing?.highlightId,
+        selection,
+        turns,
+      })
+    }
+
+    /**
+     * Drop the newest turn of a record.
+     *
+     * Cancelling 记录 removes the answer just kept, not every answer ever asked
+     * about that passage, so the record survives while it still has turns.
+     *
+     * @param {object | null} record - stored record.
+     * @returns {object | null} the record without its newest turn, or null when it would be empty.
+     */
+    function recordWithoutLastTurn(record) {
+      const turns = Array.isArray(record?.turns) ? record.turns.slice(0, -1) : []
+      if (turns.length === 0) return null
+      return buildRecord({ ...record, turns })
     }
 
     /** @returns {number} how many records the loaded session has. */
@@ -1593,7 +1661,7 @@ window.__ModuleLoader__.load({
      * Records that belong to one highlight: the ones saved against its id, plus
      * any record whose selection is this exact passage (older records predate
      * the id link). Dropping a highlight drops these too; the reverse is not
-     * true, so cancelling a single 留痕 keeps the highlight.
+     * true, so cancelling a single record keeps the highlight.
      * @param {Array<{ id: string, highlightId?: string, selection?: string }>} entries - stored records.
      * @param {string} highlightId - the highlight being removed.
      * @param {string} selection - the passage text.
@@ -1613,8 +1681,8 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Label for the 留痕 toggle: an unsaved answer offers 留痕, a saved one
-     * offers 取消留痕 so the automatic save can be undone.
+     * Label for the record toggle: an unsaved answer offers 记录, a saved one
+     * offers 取消记录 so the automatic save can be undone.
      * @param {string | null} savedRecordId - id of the record saved for this answer.
      * @param {(key: string) => string} translate - locale binder.
      * @returns {string} button label.
@@ -2079,7 +2147,7 @@ window.__ModuleLoader__.load({
             setDraft('')
             setAsked(null)
             setAnswered({ question: request.question, answer: text })
-            // Keeping the answer is the default; the 留痕 button turns into its
+            // Keeping the answer is the default; the 记录 button turns into its
             // cancel affordance so a throwaway question can still be dropped.
             setSavedRecordId(keepAnswer(request.question, text, usage, route))
             setHistory((previous) => [
@@ -2177,7 +2245,7 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * Store one answer as a 留痕 record.
+       * Append one answer to the record of its passage.
        * @param {string} question - the question that produced it.
        * @param {string} answer - the answer text.
        * @param {{ input: number, output: number } | null} usage - token usage, when reported.
@@ -2185,28 +2253,40 @@ window.__ModuleLoader__.load({
        * @returns {string | null} the stored record id.
        */
       const keepAnswer = (question, answer, usage, route) => {
-        const entry = buildRecord({
-          highlightId: highlightIdOf(nodeKey, selection) ?? undefined,
-          selection,
+        const highlightId = highlightIdOf(nodeKey, selection)
+        // One record per highlight: a second question about the same passage
+        // appends a turn instead of creating a second record.
+        const existing = highlightId === null ? null : recordForHighlight(highlightId, selection)
+        const turn = normalizeTurn({
           question,
           answer,
           provider: route?.provider ?? meta?.provider ?? model?.provider,
           model: route?.model ?? meta?.model ?? model?.model,
           usage: usage ?? tokens ?? undefined,
         })
+        if (turn === null) return null
+        const entry = recordWithTurn(existing, turn, selection, highlightId ?? undefined)
         if (entry === null) return null
         addRecord(entry, sessionId)
         bumpRecords((value) => value + 1)
         return entry.id
       }
 
-      /** Keep the current answer, or drop the record it was kept as. */
+      /** Keep the current answer, or drop just the answer it was kept as. */
       const toggleRecord = () => {
         if (savedRecordId !== null) {
-          if (removeRecord(savedRecordId, sessionId)) {
-            setSavedRecordId(null)
-            bumpRecords((value) => value + 1)
+          const entry = records.get(savedRecordId)
+          const trimmed = recordWithoutLastTurn(entry)
+          if (trimmed === null) {
+            if (removeRecord(savedRecordId, sessionId)) {
+              setSavedRecordId(null)
+              bumpRecords((value) => value + 1)
+            }
+            return
           }
+          // The passage keeps its earlier answers; only the newest one goes.
+          addRecord(trimmed, sessionId)
+          bumpRecords((value) => value + 1)
           return
         }
         if (answered === null) return
@@ -2251,7 +2331,7 @@ window.__ModuleLoader__.load({
         bumpRecords((value) => value + 1)
       }
 
-      /** One compact 留痕 list row. */
+      /** One compact record list row. */
       /** Jump to the passage a record came from, and open the card on it. */
       const locateRecord = (entry) => {
         const highlightId = highlightIdOfRecord(entry)
@@ -2270,6 +2350,13 @@ window.__ModuleLoader__.load({
 
       const recordRow = (entry) => {
         const expanded = openRecordId === entry.id
+        const turns = Array.isArray(entry.turns) ? entry.turns : []
+        const newest = turns.length > 0 ? turns[turns.length - 1] : null
+        // Collapsed: the newest turn only. Expanded: every turn, oldest first.
+        const shown = expanded ? turns : (newest === null ? [] : [newest])
+        const route = newest?.provider && newest?.model
+          ? `${newest.provider}/${newest.model}`
+          : newest?.model
         return h('div', {
           key: entry.id,
           className: `clipchat-card__record${expanded ? ' is-open' : ''}`,
@@ -2279,6 +2366,9 @@ window.__ModuleLoader__.load({
               className: 'clipchat-card__record-selection',
               title: entry.selection,
             }, snippetOf(entry.selection, 60)),
+            turns.length > 1
+              ? h('span', { className: 'clipchat-card__tag' }, `${turns.length} 问`)
+              : null,
             isCurrentSelection(entry, selection)
               ? h('span', { className: 'clipchat-card__tag' }, translate('currentSelection'))
               : null,
@@ -2296,21 +2386,23 @@ window.__ModuleLoader__.load({
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => setOpenRecordId(expanded ? null : entry.id),
           },
-            h('div', { className: 'clipchat-card__record-q' }, snippetOf(entry.question, 200)),
-            h('div', { className: 'clipchat-card__record-a' },
-              expanded ? entry.answer : snippetOf(entry.answer, 400))),
+            shown.map((turn, index) => h('div', {
+              key: `${entry.id}:${index}`,
+              className: 'clipchat-card__record-turn',
+            },
+              h('div', { className: 'clipchat-card__record-q' }, snippetOf(turn.question, 200)),
+              h('div', { className: 'clipchat-card__record-a' },
+                expanded ? turn.answer : snippetOf(turn.answer, 400))))),
           h('div', { className: 'clipchat-card__record-foot' },
             h('div', { className: 'clipchat-card__record-meta' },
-              [
-                entry.provider && entry.model ? `${entry.provider}/${entry.model}` : entry.model,
-                dateTextOf(entry.createdAt),
-              ].filter(Boolean).join(' · ')),
+              [route, dateTextOf(entry.updatedAt ?? entry.createdAt)].filter(Boolean).join(' · ')),
             h('button', {
               type: 'button',
               className: 'clipchat-card__record-locate',
               onMouseDown: (event) => event.preventDefault(),
               onClick: () => locateRecord(entry),
-            }, translate('locate'))))
+            }, translate('locate'))),
+        )
       }
 
       const onKeyDown = (event) => {
@@ -2859,6 +2951,9 @@ window.__ModuleLoader__.load({
         loadSession,
         maybeLoadSession,
         buildRecord,
+        recordWithTurn,
+        recordWithoutLastTurn,
+        normalizeTurn,
         recordCount,
         recordList,
         isCurrentSelection,

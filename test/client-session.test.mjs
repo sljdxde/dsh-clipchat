@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeRecord } from './helpers/records.mjs'
+import { makeRecord, makeTurn } from './helpers/records.mjs'
 
 const react = {
   createElement: (...args) => ({ args }),
@@ -175,12 +175,16 @@ test('buildRecord assembles the persisted record shape', async () => {
     id: 'r1',
     highlightId: 'h1',
     selection: 'passage',
-    question: 'why?',
-    answer: 'because',
-    provider: 'deepseek',
-    model: 'deepseek-chat',
-    usage: { input: 3, output: 7 },
+    turns: [{
+      question: 'why?',
+      answer: 'because',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      usage: { input: 3, output: 7 },
+      createdAt: 99,
+    }],
     createdAt: 99,
+    updatedAt: 99,
   })
 })
 
@@ -198,7 +202,8 @@ test('buildRecord generates an id and timestamp when they are absent', async () 
   assert.equal(typeof entry.id, 'string')
   assert.ok(entry.id.length > 0)
   assert.equal(typeof entry.createdAt, 'number')
-  assert.equal('usage' in entry, false)
+  assert.equal(entry.turns.length, 1)
+  assert.equal('usage' in entry.turns[0], false)
   assert.equal('highlightId' in entry, false)
 })
 
@@ -273,7 +278,12 @@ test('malformed stored records are ignored on load', async () => {
     ok: true,
     json: async () => ({
       highlights: [],
-      records: [makeRecord('r1'), null, { id: 'broken' }, { ...makeRecord('r2'), answer: '' }],
+      records: [
+        makeRecord('r1'),
+        null,
+        { id: 'broken' },
+        { ...makeRecord('r2'), turns: [{ ...makeTurn('r2'), answer: '' }] },
+      ],
     }),
   })
   const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
