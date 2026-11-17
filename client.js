@@ -67,6 +67,9 @@ window.__ModuleLoader__.load({
       copied: '已复制',
       insertToMain: '插入主输入框',
       expandAnswer: '展开',
+      locate: '定位到原文',
+      locateFailed: '原文位置已找不到',
+      locateHint: '点击展开并定位到原文',
       collapseAnswer: '收起',
       threadHint: '问一句，这段话就会留在原文上。',
       threadHintSub: '回答会自动留痕，不需要时点「取消留痕」。',
@@ -130,6 +133,9 @@ window.__ModuleLoader__.load({
       copied: 'Copied',
       insertToMain: 'Insert into main',
       expandAnswer: 'Expand',
+      locate: 'Show in reply',
+      locateFailed: 'That passage is no longer on screen',
+      locateHint: 'Click to expand and jump to the passage',
       collapseAnswer: 'Collapse',
       threadHint: 'Ask once and the passage stays marked in the reply.',
       threadHintSub: 'Answers are kept automatically; use 取消留痕 to drop one.',
@@ -212,9 +218,15 @@ window.__ModuleLoader__.load({
 .clipchat-card__record-head{display:flex;align-items:center;gap:6px}
 .clipchat-card__record-selection{flex:1;min-width:0;opacity:.75;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clipchat-card__tag{font-size:10px;border-radius:999px;padding:1px 6px;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 18%, transparent);white-space:nowrap}
+.clipchat-card__record-body{display:flex;flex-direction:column;gap:4px;border:none;background:transparent;color:inherit;font:inherit;text-align:left;padding:0;cursor:pointer;width:100%}
 .clipchat-card__record-q{font-size:12.5px;font-weight:600;line-height:1.5;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .clipchat-card__record-a{font-size:12.5px;line-height:1.6;opacity:.75;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3}
-.clipchat-card__record-meta{font-size:11px;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-card__record.is-open .clipchat-card__record-q,.clipchat-card__record.is-open .clipchat-card__record-a{display:block;-webkit-line-clamp:unset;line-clamp:unset;overflow:visible}
+.clipchat-card__record.is-open .clipchat-card__record-a{max-height:320px;overflow:auto}
+.clipchat-card__record-foot{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.clipchat-card__record-meta{font-size:11px;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.clipchat-card__record-locate{flex:none;border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:11px;cursor:pointer;border-radius:999px;padding:2px 9px;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.clipchat-card__record-locate:hover{color:var(--dsw-alias-label-primary);border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 45%, var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card__record-del{flex:none;border:1px solid transparent;background:transparent;color:inherit;opacity:.55;font-size:11.5px;cursor:pointer;border-radius:999px;padding:1px 7px;transition:opacity .12s ease,background .12s ease}
 .clipchat-card__record:hover .clipchat-card__record-del,.clipchat-card__record-del:focus-visible{opacity:1}
 .clipchat-card__record-del:hover{opacity:1;background:var(--dsw-alias-button-floating-hover)}
@@ -239,6 +251,9 @@ window.__ModuleLoader__.load({
 .clipchat-layer{position:absolute;inset:0;pointer-events:none;z-index:5}
 .clipchat-layer__line{position:absolute;box-sizing:border-box;background:transparent;border-bottom:2px solid var(--dsw-alias-state-success-primary,#1f9d63);border-radius:0 0 2px 2px;pointer-events:auto;cursor:pointer;transition:background .12s ease,border-bottom-color .12s ease}
 .clipchat-layer__line:hover{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 9%, transparent)}
+.clipchat-layer__line.is-flash{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 22%, transparent);border-bottom-width:3px}
+@media (prefers-reduced-motion:no-preference){.clipchat-layer__line.is-flash{animation:clipchat-flash 1.6s ease-out}}
+@keyframes clipchat-flash{0%{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 34%, transparent)}100%{background:transparent}}
 `
     let styleTag
 
@@ -366,6 +381,8 @@ window.__ModuleLoader__.load({
     /** Stored highlights keyed by id: `{ id, anchor, createdAt }`. */
     const highlights = new Map()
     let pendingHighlightId = null
+    /** Highlight whose underline should flash on the next render. */
+    let pendingFlashId = null
     let nextHighlightId = 1
 
     /** Stored 留痕 records of the loaded session, keyed by id. */
@@ -780,6 +797,125 @@ window.__ModuleLoader__.load({
       return entries.length === 0 ? null : entries[entries.length - 1]
     }
 
+    /**
+     * Highlight covering the passage a record was kept from, if it still exists.
+     * Newer records carry the id; older ones only match by their selection text.
+     * @param {{ highlightId?: string, selection?: string } | null} record - stored record.
+     * @returns {string | null} highlight id.
+     */
+    function highlightIdOfRecord(record) {
+      if (record === null || record === undefined || typeof record !== 'object') return null
+      if (typeof record.highlightId === 'string' && highlights.has(record.highlightId)) return record.highlightId
+      if (typeof record.selection !== 'string' || record.selection.length === 0) return null
+      for (const [id, entry] of highlights) {
+        if (entry?.anchor?.text === record.selection) return id
+      }
+      return null
+    }
+
+    /**
+     * Turn number encoded in a chat node key (`14:assistant-step22:51` → 14).
+     * @param {unknown} nodeKey - chat node key.
+     * @returns {number | null} the turn, or null when the key has no prefix.
+     */
+    function turnOfNodeKey(nodeKey) {
+      if (typeof nodeKey !== 'string') return null
+      const head = nodeKey.slice(0, nodeKey.indexOf(':'))
+      const turn = Number.parseInt(head, 10)
+      return Number.isInteger(turn) && turn > 0 ? turn : null
+    }
+
+    /**
+     * Ask the host to bring one turn into view.
+     *
+     * The chat list is virtualised: assigning `scrollTop` is reverted by the
+     * virtualizer on its next frame, so the only stable way to move the
+     * viewport is the host's own turn navigation, which also loads a turn that
+     * is not mounted yet. "加载并跳转" is the unloaded-turn variant of the same
+     * control and is only used when the plain one is absent.
+     *
+     * @param {number} turn - turn number.
+     * @returns {'jump' | 'load' | null} which control was used.
+     */
+    function navigateToTurn(turn) {
+      if (typeof document === 'undefined' || !Number.isInteger(turn)) return null
+      const wanted = `第 ${turn} 轮`
+      let fallback = null
+      for (const button of document.querySelectorAll('button')) {
+        const label = button.getAttribute('aria-label') ?? button.getAttribute('title') ?? ''
+        if (!label.includes(wanted)) continue
+        if (label === `跳转到${wanted}`) {
+          button.click()
+          return 'jump'
+        }
+        if (fallback === null && label.includes('加载并跳转')) fallback = button
+      }
+      if (fallback === null) return null
+      fallback.click()
+      return 'load'
+    }
+
+    /**
+     * Bring one stored highlight into view and flash its underline.
+     *
+     * The host scrolls asynchronously (and mounts the turn on demand), so the
+     * flash waits until the underline is actually inside the viewport instead
+     * of firing on a fixed delay.
+     *
+     * @param {string} highlightId - stored highlight id.
+     * @param {number | null} [turn] - turn from the chat snapshot; the key prefix
+     *   is not the turn number, so callers that can read the snapshot pass it.
+     * @returns {boolean} whether navigation could be started.
+     */
+    function revealHighlight(highlightId, turn = null) {
+      if (typeof document === 'undefined' || typeof highlightId !== 'string') return false
+      const anchor = highlights.get(highlightId)?.anchor
+      if (anchor === null || anchor === undefined) return false
+      const linesOf = () => [...document.querySelectorAll('.clipchat-layer__line')]
+        .filter((line) => line.getAttribute('data-clipchat-id') === highlightId)
+      const onScreen = () => {
+        for (const line of linesOf()) {
+          const box = line.getBoundingClientRect()
+          if (box.height > 0 && box.top >= 0 && box.bottom <= window.innerHeight) return true
+        }
+        return false
+      }
+      const flash = () => {
+        pendingFlashId = highlightId
+        for (const line of linesOf()) {
+          line.classList.remove('is-flash')
+          // Restart the animation even when the class was already applied.
+          void line.offsetWidth
+          line.classList.add('is-flash')
+        }
+        setTimeout(() => {
+          if (pendingFlashId === highlightId) pendingFlashId = null
+          for (const line of linesOf()) line.classList.remove('is-flash')
+        }, 1600)
+      }
+
+      const target = Number.isInteger(turn) ? turn : turnOfNodeKey(anchor.nodeKey)
+      const used = navigateToTurn(target)
+      if (used === null) {
+        const node = nodesFor(anchor.nodeKey)[0]
+        if (node === undefined || typeof node.scrollIntoView !== 'function') return false
+        node.scrollIntoView({ block: 'center' })
+      }
+
+      // Poll briefly: the jump settles after a frame or two, and an unloaded
+      // turn needs a network round trip before its lines exist.
+      const deadline = Date.now() + (used === 'load' ? 4000 : 1600)
+      const tick = () => {
+        if (onScreen() || Date.now() > deadline) {
+          flash()
+          return
+        }
+        setTimeout(tick, 120)
+      }
+      setTimeout(tick, 80)
+      return true
+    }
+
     /** Select one stored highlight and ask the host surface to open on it. */
     function openHighlight(highlight) {
       const anchor = highlight?.anchor
@@ -839,7 +975,9 @@ window.__ModuleLoader__.load({
             for (const rect of range.getClientRects()) {
               if (rect.width <= 0 || rect.height <= 0) continue
               const mark = document.createElement('div')
-              mark.className = 'clipchat-layer__line'
+              mark.className = id === pendingFlashId
+                ? 'clipchat-layer__line is-flash'
+                : 'clipchat-layer__line'
               mark.setAttribute('data-clipchat-id', id)
               mark.style.left = `${(rect.left - columnRect.left) / scaleX - column.clientLeft + column.scrollLeft}px`
               mark.style.top = `${(rect.top - columnRect.top) / scaleY - column.clientTop + column.scrollTop}px`
@@ -1400,6 +1538,8 @@ window.__ModuleLoader__.load({
       const [copiedTurn, setCopiedTurn] = React.useState(null)
       // The record kept for the current answer; an answer is kept by default.
       const [savedRecordId, setSavedRecordId] = React.useState(() => loadedRecord?.id ?? null)
+      const [openRecordId, setOpenRecordId] = React.useState(null)
+      const [locateFailed, setLocateFailed] = React.useState(false)
       const [, bumpRecords] = React.useState(0)
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
@@ -1713,34 +1853,65 @@ window.__ModuleLoader__.load({
       }
 
       /** One compact 留痕 list row. */
-      const recordRow = (entry) => h('div', {
-        key: entry.id,
-        className: 'clipchat-card__record',
-      },
-        h('div', { className: 'clipchat-card__record-head' },
-          h('span', {
-            className: 'clipchat-card__record-selection',
-            title: entry.selection,
-          }, snippetOf(entry.selection, 60)),
-          isCurrentSelection(entry, selection)
-            ? h('span', { className: 'clipchat-card__tag' }, translate('currentSelection'))
-            : null,
+      /** Jump to the passage a record came from, and open the card on it. */
+      const locateRecord = (entry) => {
+        const highlightId = highlightIdOfRecord(entry)
+        if (highlightId === null) {
+          setLocateFailed(true)
+          return
+        }
+        setLocateFailed(false)
+        const anchor = highlights.get(highlightId)?.anchor
+        const node = anchor === undefined ? undefined : nodes?.get?.(anchor.nodeKey)
+        revealHighlight(highlightId, nodeTurn(node) ?? null)
+        const highlight = highlights.get(highlightId)
+        if (highlight !== undefined) openHighlight(highlight)
+      }
+
+      const recordRow = (entry) => {
+        const expanded = openRecordId === entry.id
+        return h('div', {
+          key: entry.id,
+          className: `clipchat-card__record${expanded ? ' is-open' : ''}`,
+        },
+          h('div', { className: 'clipchat-card__record-head' },
+            h('span', {
+              className: 'clipchat-card__record-selection',
+              title: entry.selection,
+            }, snippetOf(entry.selection, 60)),
+            isCurrentSelection(entry, selection)
+              ? h('span', { className: 'clipchat-card__tag' }, translate('currentSelection'))
+              : null,
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__record-del',
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => deleteRecord(entry.id),
+            }, translate('deleteRecord'))),
           h('button', {
             type: 'button',
-            className: 'clipchat-card__record-del',
+            className: 'clipchat-card__record-body',
+            title: translate('locateHint'),
+            'aria-expanded': expanded,
             onMouseDown: (event) => event.preventDefault(),
-            onClick: () => deleteRecord(entry.id),
-          }, translate('deleteRecord'))),
-        h('div', { className: 'clipchat-card__record-q', title: entry.question },
-          snippetOf(entry.question, 200)),
-        h('div', { className: 'clipchat-card__record-a', title: entry.answer },
-          snippetOf(entry.answer, 400)),
-        h('div', { className: 'clipchat-card__record-meta' },
-          [
-            entry.provider && entry.model ? `${entry.provider}/${entry.model}` : entry.model,
-            dateTextOf(entry.createdAt),
-          ].filter(Boolean).join(' · ')),
-      )
+            onClick: () => setOpenRecordId(expanded ? null : entry.id),
+          },
+            h('div', { className: 'clipchat-card__record-q' }, snippetOf(entry.question, 200)),
+            h('div', { className: 'clipchat-card__record-a' },
+              expanded ? entry.answer : snippetOf(entry.answer, 400))),
+          h('div', { className: 'clipchat-card__record-foot' },
+            h('div', { className: 'clipchat-card__record-meta' },
+              [
+                entry.provider && entry.model ? `${entry.provider}/${entry.model}` : entry.model,
+                dateTextOf(entry.createdAt),
+              ].filter(Boolean).join(' · ')),
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__record-locate',
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => locateRecord(entry),
+            }, translate('locate'))))
+      }
 
       const onKeyDown = (event) => {
         // Enter sends, except while an IME composition is confirming.
@@ -1882,6 +2053,9 @@ window.__ModuleLoader__.load({
               'aria-pressed': recordsView === 'all',
               onClick: () => setRecordsView('all'),
             }, search.state === 'idle' && search.total > 0 ? `${translate('recordsAll')} ${search.total}` : translate('recordsAll'))),
+          locateFailed
+            ? h('div', { className: 'clipchat-card__hint' }, translate('locateFailed'))
+            : null,
           recordsView === 'session'
             ? (recordEntries.length === 0
               ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
@@ -2161,6 +2335,9 @@ window.__ModuleLoader__.load({
         ClipCard,
         currentSessionIdOf,
         highlightIdOf,
+        highlightIdOfRecord,
+        revealHighlight,
+        turnOfNodeKey,
         hasHighlight,
         storedModelOf,
         normalizeModelRoute,

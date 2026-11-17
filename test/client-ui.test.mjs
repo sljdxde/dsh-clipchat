@@ -106,3 +106,27 @@ test('removing a highlight also targets the records kept for that passage', asyn
   assert.deepEqual(plugin.__test.recordIdsOfHighlight([], 'h1', 'x'), [])
   assert.deepEqual(plugin.__test.recordIdsOfHighlight(undefined, 'h1', 'x'), [])
 })
+
+test('a record resolves to the highlight of its passage', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const anchor = { nodeKey: '9:assistant-step1:1', sourceIndex: 0, spans: [{ blockIndex: 0, start: 0, end: 7 }], text: 'passage' }
+  const id = plugin.__test.addHighlight(anchor, null)
+  assert.equal(typeof id, 'string')
+
+  assert.equal(plugin.__test.highlightIdOfRecord({ highlightId: id, selection: 'passage' }), id)
+  assert.equal(plugin.__test.highlightIdOfRecord({ selection: 'passage' }), id, 'older records match by text')
+  assert.equal(plugin.__test.highlightIdOfRecord({ highlightId: 'missing', selection: 'passage' }), id)
+  assert.equal(plugin.__test.highlightIdOfRecord({ highlightId: 'missing', selection: 'gone' }), null)
+  assert.equal(plugin.__test.highlightIdOfRecord(null), null)
+})
+
+test('a chat node key yields its turn number', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  assert.equal(plugin.__test.turnOfNodeKey('14:assistant-step22:51'), 14)
+  assert.equal(plugin.__test.turnOfNodeKey('7:user1:0'), 7)
+  assert.equal(plugin.__test.turnOfNodeKey('nope'), null)
+  assert.equal(plugin.__test.turnOfNodeKey('0:x'), null)
+  assert.equal(plugin.__test.turnOfNodeKey(null), null)
+})
