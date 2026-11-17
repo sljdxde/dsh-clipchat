@@ -120,3 +120,20 @@ test('rendering a card without asking commits no highlight', async () => {
   renderCard(plugin, { selection: 'never committed', anchor })
   assert.equal(plugin.__test.hasHighlight(anchor.nodeKey, anchor.text), false)
 })
+
+test('the kept-answer panel stays closed until the footer button opens it', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeInteractiveReact())
+  const hasPanel = (node, out = { found: false }) => {
+    if (Array.isArray(node)) {
+      for (const child of node) hasPanel(child, out)
+      return out
+    }
+    if (node === null || typeof node !== 'object' || !Array.isArray(node.args)) return out
+    const props = node.args[1]
+    if (props !== null && typeof props === 'object' && props.className === 'clipchat-card__records') out.found = true
+    hasPanel(node.args.slice(2), out)
+    return out
+  }
+  assert.equal(hasPanel(renderCard(plugin)).found, false, 'a fresh card shows the thread, not the list')
+})

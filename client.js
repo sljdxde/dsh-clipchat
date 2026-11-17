@@ -69,7 +69,7 @@ window.__ModuleLoader__.load({
       expandAnswer: '展开',
       collapseAnswer: '收起',
       threadHint: '问一句，这段话就会留在原文上。',
-      threadHintSub: '也可以点上面的快问；直接关掉不会留痕。',
+      threadHintSub: '回答会自动留痕，不需要时点「取消留痕」。',
       generating: '生成中…',
       presetExplain: '解释这段',
       presetExplainQ: '解释这段',
@@ -132,7 +132,7 @@ window.__ModuleLoader__.load({
       expandAnswer: 'Expand',
       collapseAnswer: 'Collapse',
       threadHint: 'Ask once and the passage stays marked in the reply.',
-      threadHintSub: 'Or pick a quick question above. Closing without asking leaves nothing.',
+      threadHintSub: 'Answers are kept automatically; use 取消留痕 to drop one.',
       generating: 'Generating…',
       presetExplain: 'Explain',
       presetExplainQ: 'Explain this passage',
@@ -1868,7 +1868,7 @@ window.__ModuleLoader__.load({
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => dismiss(),
           }, '×')),
-        h('div', { className: 'clipchat-card__records' },
+        recordsOpen ? h('div', { className: 'clipchat-card__records' },
           h('div', { className: 'clipchat-records__tabs' },
             h('button', {
               type: 'button',
@@ -1907,7 +1907,8 @@ window.__ModuleLoader__.load({
               search.state === 'idle' && search.results.length > 0 && search.truncated
                 ? h('div', { className: 'clipchat-card__hint' }, translate('searchTruncated'))
                 : null,
-              search.results.map(searchRow)),        ),
+              search.results.map(searchRow)),
+        ) : null,
 
         h('div', { className: 'clipchat-card__presets' },
           presetEntries.map((preset) => h('button', {
