@@ -177,7 +177,15 @@ window.__ModuleLoader__.load({
 .clipchat-card__turn+.clipchat-card__turn{border-top:1px solid var(--dsw-alias-border-l3);padding-top:16px}
 .clipchat-card__q{display:flex;gap:7px;align-items:baseline;font-size:12.5px;font-weight:600;line-height:1.55;white-space:pre-wrap;margin-bottom:10px;padding:7px 10px;border-radius:9px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-primary)}
 .clipchat-card__q::before{content:'问';flex:none;font-size:10.5px;font-weight:500;line-height:1.9;opacity:.45}
-.clipchat-card__a{position:relative;white-space:pre-wrap;line-height:1.75;font-size:13.5px;word-break:break-word;padding-left:14px;border-left:2px solid color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 30%, transparent)}
+.clipchat-card__a{position:relative;line-height:1.75;font-size:13.5px;word-break:break-word;padding-left:14px;border-left:2px solid color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 30%, transparent)}
+.clipchat-card__a>.clipchat-card__p{margin:0;white-space:pre-wrap}
+.clipchat-card__a>.clipchat-card__p+.clipchat-card__p{margin-top:9px}
+.clipchat-card__h{margin:14px 0 6px;font-size:13.5px;font-weight:600;line-height:1.5;color:var(--dsw-alias-label-primary)}
+.clipchat-card__a>:first-child.clipchat-card__h{margin-top:0}
+.clipchat-card__list{margin:6px 0 0;padding-left:18px}
+.clipchat-card__list li{margin:2px 0;white-space:pre-wrap}
+.clipchat-card__list li::marker{color:var(--dsw-alias-label-secondary,#666)}
+.clipchat-card__quote{margin:8px 0 0;padding:2px 0 2px 10px;border-left:2px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary,#666);white-space:pre-wrap}
 .clipchat-card__a code{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12.5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12));border-radius:4px;padding:1px 4px}
 .clipchat-card__turn-actions{display:flex;gap:6px;margin-top:6px;justify-content:flex-end}
 .clipchat-card__copy{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11px;line-height:1.4;cursor:pointer;border-radius:999px;padding:1px 8px;transition:background .12s ease,color .12s ease}
@@ -1309,6 +1317,101 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Split an answer into display blocks: headings, lists, quotes, paragraphs.
+     *
+     * Answers arrive as Markdown and the card used to print the raw text, so
+     * `### 标题` and `- 要点` showed up as literal characters. Only the shapes
+     * that actually appear in answers are recognised; anything else stays a
+     * paragraph, and nothing is ever parsed as HTML.
+     *
+     * @param {unknown} text - answer text.
+     * @returns {Array<{ kind: string, level?: number, ordered?: boolean, text?: string, items?: string[] }>} blocks.
+     */
+    function answerBlocks(text) {
+      if (typeof text !== 'string' || text.length === 0) return []
+      const lines = text.replace(/\r\n/gu, '\n').split('\n')
+      const blocks = []
+      let paragraph = []
+      let list = null
+      const flushParagraph = () => {
+        if (paragraph.length === 0) return
+        blocks.push({ kind: 'p', text: paragraph.join('\n') })
+        paragraph = []
+      }
+      const flushList = () => {
+        if (list === null) return
+        blocks.push(list)
+        list = null
+      }
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed.length === 0) {
+          flushParagraph()
+          flushList()
+          continue
+        }
+        const heading = /^(#{1,6})\s+(.*)$/u.exec(trimmed)
+        if (heading !== null) {
+          flushParagraph()
+          flushList()
+          blocks.push({ kind: 'h', level: Math.min(heading[1].length, 4), text: heading[2] })
+          continue
+        }
+        const bullet = /^[-*+]\s+(.*)$/u.exec(trimmed)
+        if (bullet !== null) {
+          flushParagraph()
+          if (list === null || list.ordered === true) {
+            flushList()
+            list = { kind: 'ul', ordered: false, items: [] }
+          }
+          list.items.push(bullet[1])
+          continue
+        }
+        const ordered = /^\d+[.)]\s+(.*)$/u.exec(trimmed)
+        if (ordered !== null) {
+          flushParagraph()
+          if (list === null || list.ordered !== true) {
+            flushList()
+            list = { kind: 'ol', ordered: true, items: [] }
+          }
+          list.items.push(ordered[1])
+          continue
+        }
+        const quote = /^>\s?(.*)$/u.exec(trimmed)
+        if (quote !== null) {
+          flushParagraph()
+          flushList()
+          blocks.push({ kind: 'quote', text: quote[1] })
+          continue
+        }
+        flushList()
+        paragraph.push(line)
+      }
+      flushParagraph()
+      flushList()
+      return blocks
+    }
+
+    /**
+     * Plain text of an answer for the clipboard: block markers dropped, the way
+     * the reader sees them.
+     * @param {unknown} text - answer text.
+     * @returns {string} plain text.
+     */
+    function answerPlain(text) {
+      return answerBlocks(text).map((block) => {
+        if (block.kind === 'h') return block.text
+        if (block.kind === 'quote') return `“${block.text}”`
+        if (block.kind === 'ul' || block.kind === 'ol') {
+          return block.items
+            .map((item, index) => `${block.ordered === true ? `${index + 1}. ` : '- '}${item}`)
+            .join('\n')
+        }
+        return block.text
+      }).join('\n\n')
+    }
+
+    /**
      * One-line summary of a Q&A for the main composer, capped at 200 chars.
      * Newlines are folded to spaces: the composer already separates blocks, and
      * an inserted line break reads as an accidental blank line.
@@ -2046,10 +2149,27 @@ window.__ModuleLoader__.load({
       const turns = threadTurns(history, currentTurn, loadedRecord)
       const presetEntries = presetList(translate)
 
-      const answerView = (text) => inlineParts(text).map((part, index) => {
-        if (part.code === true) return h('code', { key: index }, part.text)
-        if (part.strong === true) return h('strong', { key: index }, part.text)
+      /** Inline markup: only `**bold**` and `` `code` `` are styled. */
+      const inlineView = (text, prefix) => inlineParts(text).map((part, index) => {
+        if (part.code === true) return h('code', { key: `${prefix}:${index}` }, part.text)
+        if (part.strong === true) return h('strong', { key: `${prefix}:${index}` }, part.text)
         return part.text
+      })
+
+      /** Render an answer as blocks instead of printing its Markdown. */
+      const answerView = (text) => answerBlocks(text).map((block, index) => {
+        const key = `${index}:${block.kind}`
+        if (block.kind === 'h') {
+          return h(`h${block.level + 2}`, { key, className: 'clipchat-card__h' }, inlineView(block.text, key))
+        }
+        if (block.kind === 'quote') {
+          return h('blockquote', { key, className: 'clipchat-card__quote' }, inlineView(block.text, key))
+        }
+        if (block.kind === 'ul' || block.kind === 'ol') {
+          return h(block.kind === 'ol' ? 'ol' : 'ul', { key, className: 'clipchat-card__list' },
+            block.items.map((item, itemIndex) => h('li', { key: `${key}:${itemIndex}` }, inlineView(item, `${key}:${itemIndex}`))))
+        }
+        return h('p', { key, className: 'clipchat-card__p' }, inlineView(block.text, key))
       })
 
       /** Copy one turn's answer; a denied clipboard must not break the card. */
@@ -2058,7 +2178,7 @@ window.__ModuleLoader__.load({
         try {
           if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') return
           // Copy what the reader sees: `**bold**` and `` `code` `` lose their markers.
-          const plain = inlineParts(turn.answer).map((part) => part.text).join('')
+          const plain = answerPlain(turn.answer)
           await navigator.clipboard.writeText(plain)
           setCopiedTurn(index)
         } catch {
@@ -2433,6 +2553,8 @@ window.__ModuleLoader__.load({
         insertPayloadOf,
         presetList,
         inlineParts,
+        answerBlocks,
+        answerPlain,
         threadTurns,
         turnOf,
         presetDisabled,

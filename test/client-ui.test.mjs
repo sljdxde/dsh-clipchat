@@ -132,3 +132,37 @@ test('a chat node key yields its turn number', async () => {
   assert.equal(plugin.__test.turnOfNodeKey('0:x'), null)
   assert.equal(plugin.__test.turnOfNodeKey(null), null)
 })
+
+test('an answer renders as blocks instead of raw Markdown', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const blocks = plugin.__test.answerBlocks([
+    '### 它要解决的问题',
+    '',
+    '第一段**加粗**和 `code`。',
+    '',
+    '- 要点一',
+    '- 要点二',
+    '',
+    '1. 第一步',
+    '2. 第二步',
+    '',
+    '> 引用一句',
+  ].join('\n'))
+  assert.deepEqual(blocks.map((block) => block.kind), ['h', 'p', 'ul', 'ol', 'quote'])
+  assert.equal(blocks[0].level, 3)
+  assert.equal(blocks[0].text, '它要解决的问题')
+  assert.deepEqual(blocks[2].items, ['要点一', '要点二'])
+  assert.deepEqual(blocks[3].items, ['第一步', '第二步'])
+  assert.equal(blocks[4].text, '引用一句')
+})
+
+test('the clipboard text of an answer drops block markers', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  assert.equal(plugin.__test.answerPlain('### 标题\n\n正文'), '标题\n\n正文')
+  assert.equal(plugin.__test.answerPlain('- a\n- b'), '- a\n- b')
+  assert.equal(plugin.__test.answerPlain('1. a\n2. b'), '1. a\n2. b')
+  assert.equal(plugin.__test.answerPlain('> 引用'), '“引用”')
+  assert.equal(plugin.__test.answerPlain(''), '')
+})
