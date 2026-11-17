@@ -7,6 +7,7 @@
 - **划词即问**：只对 assistant 正文生效；用户消息、思考区、工具卡片不出现入口。
 - **就近卡片**：选段栏、4 个快捷提问（解释这段 / 翻译 / 找问题 / 举个例子）、问答线程、流式回答、停止生成、输入输出 token。
 - **问答线程**：提问与回答分别成块（提问带底色与「问」标记，回答带绿色竖线），每条回答可单独复制；发送后输入框自动清空，等待下一次提问。
+- **详细回答**：输入框下方一个 30px 开关，默认关闭。关闭时注入选段 + 整条消息 + 同轮前后 + 前 3 轮；开启后改注整个会话的分层摘要（历史轮次 + 工具名 + 压缩摘要），代价读数与注入明细都在开关上。宿主读不到日志时自动降级回近轮上下文。
 - **回答排版**：回答按 Markdown 渲染标题、列表、引用与段落（不支持表格、代码块、图片），只保留 `**加粗**` 与 `` `行内代码` `` 两种行内样式。
 - **连续追问**：同一张卡片里继续问，历史随请求一起带走。
 - **可复制**：每条回答下方有「复制」按钮，答案文本也可以直接选中复制；点击卡片内部不会关闭卡片，点卡片外才关闭。
@@ -65,6 +66,7 @@ client.js         browser 半边：包装 quote 插槽、菜单/卡片/线程、
 lib/context.js    上下文拼装与截断（system + <context> + 历史 + 本次问题）
 lib/http.js       JSON 请求体读取、SSE 写入、同源守卫
 lib/model.js      模型路由规范化与会话模型解析
+lib/digest.js     会话分层摘要：用户消息 + 助手正文 + 工具名 + 压缩摘要（详细模式）
 lib/models.js     模型目录汇总与可用性校验
 lib/search.js     跨会话留痕搜索（纯函数）
 lib/store.js      每会话 JSON 存储：原子写、上限、TTL、孤儿清理
@@ -93,6 +95,7 @@ scripts/          检查脚本与本地开发链接
 | GET | `/dsh-clipchat/models?sessionId=` | 模型目录与会话当前路由 |
 | POST | `/dsh-clipchat/ask` | SSE 回答，帧为 `meta` / `delta` / `usage` / `done` / `error` |
 | GET | `/dsh-clipchat/session?sessionId=` | 该会话的高亮与留痕 |
+| GET | `/dsh-clipchat/context?sessionId=` | 详细模式的会话摘要（`{ available, digest, stats }`，读不到时 `available: false`） |
 | GET | `/dsh-clipchat/search?q=&limit=` | 跨会话留痕搜索（`limit` 默认 20、上限 50） |
 | POST | `/dsh-clipchat/highlight` | 高亮增删（`op: add/remove`） |
 | POST | `/dsh-clipchat/record` | 留痕增删（`op: add/remove`） |

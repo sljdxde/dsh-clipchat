@@ -1,11 +1,12 @@
 /**
  * dsh-clipchat host half.
  *
- * Seven routes, all behind the host's own request fence:
+ * Eight routes, all behind the host's own request fence:
  *   GET  /dsh-clipchat/status    → { ok, guard, model } for development self-checks
  *   GET  /dsh-clipchat/models    → { models, current } for the per-highlight picker
  *   POST /dsh-clipchat/ask       → SSE answer for one in-card question
  *   GET  /dsh-clipchat/session   → { highlights, records } of one conversation
+ *   GET  /dsh-clipchat/context   → { digest, stats } of one conversation for detailed mode
  *   GET  /dsh-clipchat/search    → { items, total, truncated } across every session
  *   POST /dsh-clipchat/highlight → { highlights } after an add or remove
  *   POST /dsh-clipchat/record    → { records } after an add or remove
@@ -23,6 +24,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { buildContext, ContextError, LIMITS } from './lib/context.js'
+import { buildDigest, digestStats, renderDigest } from './lib/digest.js'
 import {
   RequestBodyError, openSse, readJsonBody, sameOriginRejection, sendJson, writeFrame,
 } from './lib/http.js'
@@ -39,7 +41,12 @@ const HIGHLIGHT_PATH = `${PREFIX}/highlight`
 const RECORD_PATH = `${PREFIX}/record`
 const MODELS_PATH = `${PREFIX}/models`
 const SEARCH_PATH = `${PREFIX}/search`
+const CONTEXT_PATH = `${PREFIX}/context`
 const ANSWER_MAX_TOKENS = 2048
+/** How long the context route waits for a cold session log before degrading. */
+const CONTEXT_READ_TIMEOUT_MS = 1200
+/** Ceiling for one detailed request: the digest plus the local context. */
+const DETAIL_TOTAL_CHARS = 60000
 
 /**
  * Load the host LLM message helpers. A linked local bundle resolves outside
@@ -298,6 +305,10 @@ export function apply(ctx, options = {}) {
         message: body?.message,
         turn: body?.turn,
         recent: body?.recent,
+        // Detailed mode: the client passes the digest it fetched, plus the
+        // raised ceiling that lets both it and the local context fit.
+        digest: body?.digest,
+        totalChars: body?.detail === true ? DETAIL_TOTAL_CHARS : undefined,
         neighbors: body?.neighbors,
         history: body?.history,
         question: body?.question,
@@ -421,6 +432,85 @@ export function apply(ctx, options = {}) {
           && entry.model === current.model,
       })),
       current,
+    })
+  })
+
+  /**
+   * Read one conversation's events for the detailed-mode digest.
+   *
+   * `observeSession` is the only supported read path: it works for a live
+   * session and for a cold one restored from persistence, and the returned
+   * observation is a disposable lease over an immutable cut. The lease is
+   * always released, so a burst of asks cannot pin session preparations.
+   *
+   * @param {string} sessionId - conversation to read.
+   * @param {AbortSignal} [signal] - cancels a cold preparation.
+   * @returns {Promise<{ events: readonly object[] } | null>} the cut, or null when unavailable.
+   */
+  const readSessionEvents = async (sessionId, signal) => {
+    const query = ctx.get('sessionQuery')
+    if (typeof query?.observeSession !== 'function') return null
+    let observation
+    try {
+      observation = await query.observeSession(sessionId, {
+        projectionMode: 'none',
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch {
+      // Not persisted, not readable, or not a session: detailed mode degrades.
+      return null
+    }
+    try {
+      const events = observation?.events
+      return Array.isArray(events) ? { events } : null
+    } finally {
+      if (typeof observation?.[Symbol.dispose] === 'function') {
+        try {
+          observation[Symbol.dispose]()
+        } catch {
+          /* Releasing a lease must never fail the request. */
+        }
+      }
+    }
+  }
+
+  /**
+   * `GET /dsh-clipchat/context`: the session digest detailed mode injects.
+   *
+   * Returns the rendered block and the numbers the card shows. An unavailable
+   * conversation is not an error: the client falls back to the near-turn
+   * context and marks the toggle degraded.
+   */
+  const handleContext = readRoute('context-unavailable', async (req, res) => {
+    const sessionId = sessionIdOf(req)
+    if (sessionId === null || sessionId.length === 0) {
+      sendJson(res, 400, { error: 'missing-session-id' })
+      return
+    }
+    if (!isValidSessionId(sessionId)) {
+      sendJson(res, 400, { error: 'invalid-session-id' })
+      return
+    }
+
+    // A slow or missing log must not hold the ask: the client gives up first.
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), CONTEXT_READ_TIMEOUT_MS)
+    let read
+    try {
+      read = await readSessionEvents(sessionId, controller.signal)
+    } finally {
+      clearTimeout(timer)
+    }
+    if (read === null) {
+      sendJson(res, 200, { available: false })
+      return
+    }
+
+    const digest = buildDigest(read.events)
+    sendJson(res, 200, {
+      available: true,
+      digest: renderDigest(digest),
+      stats: digestStats(digest),
     })
   })
 
@@ -555,6 +645,10 @@ export function apply(ctx, options = {}) {
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: SESSION_PATH, handler: handleSession }),
       'dsh-clipchat: session route',
+    )
+    scope.effect(
+      () => scope.webServer.register({ kind: 'exact', path: CONTEXT_PATH, handler: handleContext }),
+      'dsh-clipchat: context route',
     )
     scope.effect(
       () => scope.webServer.register({ kind: 'exact', path: SEARCH_PATH, handler: handleSearch }),

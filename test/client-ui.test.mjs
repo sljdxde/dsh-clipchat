@@ -166,3 +166,40 @@ test('the clipboard text of an answer drops block markers', async () => {
   assert.equal(plugin.__test.answerPlain('> 引用'), '“引用”')
   assert.equal(plugin.__test.answerPlain(''), '')
 })
+
+test('the detail strip lists what the request actually carries', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const pieces = {
+    selection: 'x'.repeat(100),
+    message: 'y'.repeat(200),
+    neighbors: { user: 'a'.repeat(10), before: '', after: '' },
+    recent: [{ user: 'b'.repeat(20), assistant: 'c'.repeat(30) }],
+  }
+
+  // Off: four rows, total is the sum of the local context.
+  const off = plugin.__test.contextRowsOf({ ...pieces, stats: null })
+  assert.deepEqual(off.rows.map((row) => row.id), ['selection', 'message', 'neighbors', 'recent'])
+  assert.equal(off.chars, 100 + 200 + 10 + 50)
+  assert.equal(off.rows.every((row) => row.isNew === undefined), true)
+
+  // On: the recent row is marked replaced and the digest rows are marked new.
+  const on = plugin.__test.contextRowsOf({
+    ...pieces,
+    stats: { turns: 18, tools: 207, summaryChars: 8000, chars: 42000, tokens: 26250 },
+  })
+  assert.deepEqual(on.rows.map((row) => row.id), ['selection', 'message', 'neighbors', 'recent', 'turns', 'tools', 'summary'])
+  assert.equal(on.rows.find((row) => row.id === 'recent').isOff, true)
+  assert.deepEqual(on.rows.filter((row) => row.isNew === true).map((row) => row.id), ['turns', 'tools', 'summary'])
+  assert.equal(on.chars, off.chars + 42000)
+  assert.ok(on.tokens > off.tokens)
+})
+
+test('fillTemplate replaces known placeholders and leaves unknown ones', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  assert.equal(plugin.__test.fillTemplate('全史 {turns} 轮', { turns: 18 }), '全史 18 轮')
+  assert.equal(plugin.__test.fillTemplate('{a}-{b}', { a: 1 }), '1-{b}')
+  assert.equal(plugin.__test.fillTemplate('', {}), '')
+  assert.equal(plugin.__test.fillTemplate(null, {}), '')
+})

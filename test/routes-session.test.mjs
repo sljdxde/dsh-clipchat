@@ -64,9 +64,14 @@ const addBody = {
   highlight: { id: 'h1', anchor, createdAt: 111 },
 }
 
-async function setup({ connection = { requestRejection: () => undefined } } = {}) {
+async function setup({
+  connection = { requestRejection: () => undefined },
+  sessionQuery,
+  sessions,
+  workspaceRegistry,
+} = {}) {
   const storeRoot = await mkdtemp(join(tmpdir(), 'clipchat-routes-'))
-  const { ctx, routes, disposers } = makeContext({ connection })
+  const { ctx, routes, disposers } = makeContext({ connection, sessionQuery, sessions, workspaceRegistry })
   apply(ctx, { storeRoot })
   return { routes, disposers, storeRoot, store: createStore({ root: storeRoot }) }
 }
@@ -757,4 +762,101 @@ test('the search route honours the connection guard', async () => {
     assert.equal(res.status, rejection)
     for (const dispose of disposers.reverse()) dispose()
   }
+})
+
+// --- session digest for detailed mode ---
+
+const CONTEXT_PATH = '/dsh-clipchat/context'
+
+test('registers the context route next to the others', async () => {
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+  })
+  apply(ctx, { storeRoot: '/tmp/unused-clipchat-root' })
+  assert.equal(typeof routes.get(CONTEXT_PATH), 'function')
+})
+
+/** A sessionQuery stub whose observation is disposable, like the real one. */
+function makeSessionQuery(events, { throwOnObserve = false } = {}) {
+  const observed = []
+  return {
+    observed,
+    async observeSession(sessionId) {
+      observed.push(sessionId)
+      if (throwOnObserve) throw new Error('not found')
+      let disposed = false
+      return {
+        source: 'live',
+        header: { id: sessionId },
+        events,
+        get [Symbol.dispose]() {
+          return () => { disposed = true; observed.push('disposed') }
+        },
+      }
+    },
+  }
+}
+
+test('GET context returns the rendered digest and its stats', async () => {
+  const sessionQuery = makeSessionQuery([
+    { type: 'turn/start', data: { turn: 3 } },
+    { type: 'user/message', data: { content: [{ type: 'text', text: 'do the thing' }] } },
+    {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'done' }, { type: 'tool-call', name: 'bash' }] } },
+    },
+  ])
+  const { routes } = await setup({ sessionQuery })
+
+  const res = await call(routes.get(CONTEXT_PATH), makeRequest({
+    method: 'GET',
+    url: `${CONTEXT_PATH}?sessionId=session-a`,
+    headers: { host: 'h' },
+  }))
+
+  assert.equal(res.status, 200)
+  const body = payloadOf(res)
+  assert.equal(body.available, true)
+  assert.ok(body.digest.includes('<history>'), body.digest)
+  assert.ok(body.digest.includes('do the thing'))
+  assert.ok(body.digest.includes('tools="bash"'))
+  assert.equal(body.stats.turns, 1)
+  assert.equal(body.stats.tools, 1)
+  assert.equal(body.stats.firstTurn, 3)
+  // The observation lease is released, so preparations are not pinned.
+  assert.equal(sessionQuery.observed.includes('disposed'), true)
+})
+
+test('GET context reports unavailable instead of failing when the log is missing', async () => {
+  const { routes } = await setup({ sessionQuery: makeSessionQuery([], { throwOnObserve: true }) })
+  const res = await call(routes.get(CONTEXT_PATH), makeRequest({
+    method: 'GET', url: `${CONTEXT_PATH}?sessionId=session-a`, headers: { host: 'h' },
+  }))
+  assert.equal(res.status, 200)
+  assert.equal(payloadOf(res).available, false)
+})
+
+test('GET context is unavailable when the host mounts no sessionQuery', async () => {
+  const { routes } = await setup({ sessionQuery: undefined })
+  const res = await call(routes.get(CONTEXT_PATH), makeRequest({
+    method: 'GET', url: `${CONTEXT_PATH}?sessionId=session-a`, headers: { host: 'h' },
+  }))
+  assert.equal(res.status, 200)
+  assert.equal(payloadOf(res).available, false)
+})
+
+test('GET context rejects a missing or unsafe session id', async () => {
+  const { routes } = await setup({ sessionQuery: makeSessionQuery([]) })
+  for (const url of [CONTEXT_PATH, `${CONTEXT_PATH}?sessionId=../etc`]) {
+    const res = await call(routes.get(CONTEXT_PATH), makeRequest({ method: 'GET', url, headers: { host: 'h' } }))
+    assert.equal(res.status, 400)
+  }
+})
+
+test('the context route honours the connection guard', async () => {
+  const { routes } = await setup({ connection: { requestRejection: () => 401 }, sessionQuery: makeSessionQuery([]) })
+  const res = await call(routes.get(CONTEXT_PATH), makeRequest({
+    method: 'GET', url: `${CONTEXT_PATH}?sessionId=session-a`, headers: { host: 'h' },
+  }))
+  assert.equal(res.status, 401)
 })

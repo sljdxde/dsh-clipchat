@@ -10,6 +10,9 @@ window.__ModuleLoader__.load({
     const RECORD_PATH = '/dsh-clipchat/record'
     const MODELS_PATH = '/dsh-clipchat/models'
     const SEARCH_PATH = '/dsh-clipchat/search'
+    const CONTEXT_PATH = '/dsh-clipchat/context'
+    /** Rough characters-per-token for mixed Chinese and code; display only. */
+    const CHARS_PER_TOKEN = 1.6
     const FOLLOW_MODEL = 'follow'
     const HISTORY_LIMIT = 12
     const RECENT_LIMIT = 3
@@ -70,6 +73,26 @@ window.__ModuleLoader__.load({
       locate: '定位到原文',
       locateFailed: '原文位置已找不到',
       locateHint: '点击展开并定位到原文',
+      detail: '详细',
+      detailHint: '开启后注入整段会话的历史',
+      detailOff: '近 3 轮',
+      detailOn: '全史 {turns} 轮',
+      detailDegraded: '降级 · 退回近 3 轮',
+      detailLoading: '读取历史…',
+      detailFailed: '历史读取失败，已退回近轮上下文',
+      detailMore: '明细',
+      detailRows: '注入内容',
+      detailTotal: '合计 {chars} · {tokens}',
+      detailNoteOff: '只给这一段附近的上下文，不含工具调用与更早的轮次',
+      detailNoteOn: '整段会话：从第 {first} 轮起，含更早轮次的压缩摘要',
+      detailNoteDegraded: '历史读取失败，已退回近轮上下文；回答不受影响，可重试',
+      ctxSelection: '选段',
+      ctxMessage: '整条消息',
+      ctxNeighbors: '同轮前后',
+      ctxRecent: '前 3 轮问答',
+      ctxTurns: '历史轮次',
+      ctxTools: '工具调用',
+      ctxSummary: '压缩摘要',
       collapseAnswer: '收起',
       threadHint: '问一句，这段话就会留在原文上。',
       threadHintSub: '回答会自动留痕，不需要时点「取消留痕」。',
@@ -136,6 +159,26 @@ window.__ModuleLoader__.load({
       locate: 'Show in reply',
       locateFailed: 'That passage is no longer on screen',
       locateHint: 'Click to expand and jump to the passage',
+      detail: 'Detail',
+      detailHint: 'Inject the whole session history',
+      detailOff: 'last 3 turns',
+      detailOn: 'all {turns} turns',
+      detailDegraded: 'degraded · last 3 turns',
+      detailLoading: 'reading history…',
+      detailFailed: 'History unavailable, fell back to nearby turns',
+      detailMore: 'details',
+      detailRows: 'Injected',
+      detailTotal: '{chars} · {tokens}',
+      detailNoteOff: 'Nearby context only; no tool calls, no earlier turns',
+      detailNoteOn: 'Whole session: from turn {first}, plus a summary of earlier turns',
+      detailNoteDegraded: 'History unavailable; fell back to nearby turns. The answer is unaffected.',
+      ctxSelection: 'selection',
+      ctxMessage: 'whole message',
+      ctxNeighbors: 'nearby steps',
+      ctxRecent: 'last 3 turns',
+      ctxTurns: 'history turns',
+      ctxTools: 'tool calls',
+      ctxSummary: 'summary',
       collapseAnswer: 'Collapse',
       threadHint: 'Ask once and the passage stays marked in the reply.',
       threadHintSub: 'Answers are kept automatically; use 取消留痕 to drop one.',
@@ -200,6 +243,38 @@ window.__ModuleLoader__.load({
 .clipchat-card__send{flex:none;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));font:inherit;font-size:15px;cursor:pointer;border-radius:10px;padding:0;transition:opacity .12s ease,transform .12s ease,background .12s ease}
 .clipchat-card__send:hover:not(:disabled){transform:translateY(-1px)}
 .clipchat-card__send:disabled{background:transparent;color:var(--dsw-alias-label-primary);opacity:.45;cursor:default}
+.clipchat-strip{position:relative;display:flex;align-items:center;gap:8px;margin:0 16px 2px;padding:4px 9px;height:30px;border:1px solid transparent;border-radius:8px;transition:background .16s ease,border-color .16s ease}
+.clipchat-strip:hover{border-color:var(--dsw-alias-border-l3)}
+.clipchat-strip.is-on{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 7%, transparent);border-color:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 26%, transparent)}
+.clipchat-strip.is-degraded{background:color-mix(in srgb, #b0741c 7%, transparent);border-color:color-mix(in srgb, #b0741c 28%, transparent)}
+.clipchat-strip__switch{position:relative;flex:none;width:26px;height:15px;border:1px solid var(--dsw-alias-border-l3);border-radius:999px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));cursor:pointer;padding:0;transition:background .16s ease,border-color .16s ease}
+.clipchat-strip__switch::after{content:'';position:absolute;top:1px;left:1px;width:11px;height:11px;border-radius:50%;background:var(--dsw-alias-label-secondary,#666);transition:transform .16s ease,background .16s ease}
+.clipchat-strip__switch[aria-checked="true"]{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 12%, transparent);border-color:var(--dsw-alias-state-success-primary,#1f9d63)}
+.clipchat-strip__switch[aria-checked="true"]::after{transform:translateX(11px);background:var(--dsw-alias-state-success-primary,#1f9d63)}
+.clipchat-strip__switch:focus-visible{outline:2px solid var(--dsw-alias-state-success-primary,#1f9d63);outline-offset:2px}
+.clipchat-strip__label{font-size:11.5px;font-weight:500;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;cursor:pointer}
+.clipchat-strip.is-on .clipchat-strip__label{color:var(--dsw-alias-state-success-primary,#1f9d63);font-weight:600}
+.clipchat-strip.is-degraded .clipchat-strip__label{color:#b0741c;font-weight:600}
+.clipchat-strip__sep{color:var(--dsw-alias-border-l3);font-size:10px}
+.clipchat-strip__readout{font-size:11px;line-height:1.3;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clipchat-strip.is-on .clipchat-strip__readout{color:var(--dsw-alias-state-success-primary,#1f9d63)}
+.clipchat-strip.is-degraded .clipchat-strip__readout{color:#b0741c}
+.clipchat-strip__more{flex:none;margin-left:auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:10.5px;line-height:1;padding:3px 4px;border-radius:5px;cursor:pointer;opacity:.75;transition:opacity .12s ease,background .12s ease}
+.clipchat-strip__more:hover{opacity:1;background:var(--dsw-alias-button-floating-hover)}
+.clipchat-strip__detail{position:absolute;left:0;bottom:calc(100% + 5px);z-index:4;width:262px;padding:7px 9px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));border:1px solid var(--dsw-alias-border-l3);border-radius:8px;box-shadow:var(--dsw-elevation-panel);opacity:0;transform:translateY(3px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+.clipchat-strip:hover .clipchat-strip__detail,.clipchat-strip:focus-within .clipchat-strip__detail,.clipchat-strip__detail.is-pinned{opacity:1;transform:none;pointer-events:auto}
+.clipchat-strip__row{display:flex;align-items:baseline;gap:6px;padding:1px 0;font-size:10.5px;line-height:1.45}
+.clipchat-strip__k{color:var(--dsw-alias-label-secondary,#666);white-space:nowrap}
+.clipchat-strip__k::before{content:'·';margin-right:5px;opacity:.5}
+.clipchat-strip__dots{flex:1;min-width:6px;border-bottom:1px dotted var(--dsw-alias-border-l3);transform:translateY(-3px)}
+.clipchat-strip__v{font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap}
+.clipchat-strip__row.is-new .clipchat-strip__k,.clipchat-strip__row.is-new .clipchat-strip__v{color:var(--dsw-alias-state-success-primary,#1f9d63);font-weight:600}
+.clipchat-strip__row.is-off .clipchat-strip__k{text-decoration:line-through;text-decoration-thickness:1px;opacity:.55}
+.clipchat-strip__foot{margin-top:5px;padding-top:5px;border-top:1px solid var(--dsw-alias-border-l3);font-size:10px;line-height:1.5;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clipchat-strip__foot b{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}
+.clipchat-strip.is-on .clipchat-strip__foot b{color:var(--dsw-alias-state-success-primary,#1f9d63)}
+.clipchat-strip.is-degraded .clipchat-strip__foot b{color:#b0741c}
+@media (prefers-reduced-motion:reduce){.clipchat-strip__detail{transition:none}}
 .clipchat-card__footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 16px 12px}
 .clipchat-card__modelwrap{position:relative}
 .clipchat-card__modelbtn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s ease,color .12s ease}
@@ -1310,6 +1385,64 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Rows the toggle's detail popup lists, from the pieces actually sent.
+     *
+     * The numbers come from the same values the request carries, so the readout
+     * never claims something the request does not do. `digest` rows are appended
+     * only when detailed mode has a digest to inject.
+     *
+     * @param {object} input - context pieces.
+     * @param {string} input.selection - selected passage.
+     * @param {string} input.message - visible text of the selected message.
+     * @param {{ user: string, before: string, after: string }} input.neighbors - neighbouring steps.
+     * @param {Array<{ user: string, assistant: string }>} input.recent - recent turns.
+     * @param {{ turns: number, tools: number, summaryChars: number, chars: number, tokens: number } | null} [input.stats] - digest stats.
+     * @returns {{ rows: Array<{ id: string, value: string, isNew?: boolean, isOff?: boolean }>, chars: number, tokens: number }} rows and totals.
+     */
+    function contextRowsOf({ selection, message, neighbors, recent, stats }) {
+      const text = (value) => (typeof value === 'string' ? value.length : 0)
+      const recentChars = (Array.isArray(recent) ? recent : [])
+        .reduce((total, turn) => total + text(turn?.user) + text(turn?.assistant), 0)
+      const neighborChars = text(neighbors?.user) + text(neighbors?.before) + text(neighbors?.after)
+
+      const rows = [
+        { id: 'selection', value: text(selection) },
+        { id: 'message', value: text(message) },
+        { id: 'neighbors', value: neighborChars },
+        { id: 'recent', value: recentChars },
+      ]
+      let chars = rows.reduce((total, row) => total + row.value, 0)
+      let tokens = Math.round(chars / CHARS_PER_TOKEN)
+
+      if (stats !== null && stats !== undefined) {
+        // Detailed mode replaces the recent turns with the digest.
+        for (const row of rows) {
+          if (row.id === 'recent') row.isOff = true
+        }
+        rows.push({ id: 'turns', value: stats.turns, isNew: true, unit: 'turns' })
+        rows.push({ id: 'tools', value: stats.tools, isNew: true, unit: 'times' })
+        rows.push({ id: 'summary', value: stats.summaryChars, isNew: true })
+        chars += stats.chars
+        tokens = Math.round(chars / CHARS_PER_TOKEN)
+      }
+
+      return { rows, chars, tokens }
+    }
+
+    /**
+     * Fill `{name}` placeholders in one localized string.
+     * @param {string} template - localized text.
+     * @param {Record<string, string | number>} values - replacements.
+     * @returns {string} filled text.
+     */
+    function fillTemplate(template, values) {
+      if (typeof template !== 'string') return ''
+      return template.replace(/\{(\w+)\}/gu, (whole, key) => (
+        Object.hasOwn(values ?? {}, key) ? String(values[key]) : whole
+      ))
+    }
+
     /** Shorten one text for a compact list row. */
     function snippetOf(text, limit) {
       if (typeof text !== 'string') return ''
@@ -1754,6 +1887,11 @@ window.__ModuleLoader__.load({
       const [savedRecordId, setSavedRecordId] = React.useState(() => loadedRecord?.id ?? null)
       const [openRecordId, setOpenRecordId] = React.useState(null)
       const [locateFailed, setLocateFailed] = React.useState(false)
+      // Detailed mode: off by default, and its digest is fetched on demand.
+      const [detail, setDetail] = React.useState(false)
+      const [detailDigest, setDetailDigest] = React.useState(null)
+      const [detailState, setDetailState] = React.useState('idle')
+      const [detailOpen, setDetailOpen] = React.useState(false)
       const [, bumpRecords] = React.useState(0)
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
@@ -1797,6 +1935,46 @@ window.__ModuleLoader__.load({
         const timer = setTimeout(() => setCopiedTurn(null), 1500)
         return () => clearTimeout(timer)
       }, [copiedTurn])
+
+      // Detailed mode reads the session digest on demand: turning the toggle on
+      // fetches it, turning it off forgets it so the next ask is cheap again.
+      React.useEffect(() => {
+        if (!detail || typeof fetch !== 'function') {
+          setDetailDigest(null)
+          setDetailState('idle')
+          return undefined
+        }
+        if (typeof sessionId !== 'string' || sessionId.length === 0) {
+          setDetailState('failed')
+          return undefined
+        }
+        let alive = true
+        const controller = typeof AbortController === 'function' ? new AbortController() : null
+        setDetailState('loading')
+        fetchJson(
+          `${CONTEXT_PATH}?sessionId=${encodeURIComponent(sessionId)}`,
+          controller === null ? undefined : controller.signal,
+        )
+          .then((payload) => {
+            if (!alive) return
+            if (payload?.available !== true || typeof payload.digest !== 'string' || payload.digest.length === 0) {
+              setDetailDigest(null)
+              setDetailState('failed')
+              return
+            }
+            setDetailDigest(payload)
+            setDetailState('ready')
+          })
+          .catch((error) => {
+            if (!alive || error?.name === 'AbortError') return
+            setDetailDigest(null)
+            setDetailState('failed')
+          })
+        return () => {
+          alive = false
+          controller?.abort()
+        }
+      }, [detail, sessionId])
 
       // Keep the newest turn in view while the answer grows.
       React.useEffect(() => {
@@ -1971,6 +2149,12 @@ window.__ModuleLoader__.load({
           question,
         }
         if (model !== null) request.model = model
+        // Detailed mode only changes the request when the digest actually
+        // arrived; a failed read falls back to the normal context.
+        if (detail && detailState === 'ready' && typeof detailDigest?.digest === 'string') {
+          request.detail = true
+          request.digest = detailDigest.digest
+        }
         void ask(request, requestId, controller.signal)
       }
 
@@ -2151,6 +2335,93 @@ window.__ModuleLoader__.load({
       const currentTurn = asked === null ? null : turnOf(asked, answer, { streaming, error })
       const turns = threadTurns(history, currentTurn, loadedRecord)
       const presetEntries = presetList(translate)
+
+      /* Detailed mode: one 30px strip, with the injected rows in a hover popup. */
+      const detailStats = detailState === 'ready' && detailDigest?.stats !== undefined
+        ? detailDigest.stats
+        : null
+      const detailUsable = detail && detailStats !== null
+      const stripState = !detail ? 'off' : (detailUsable ? 'on' : (detailState === 'loading' ? 'loading' : 'degraded'))
+      const stripRows = contextRowsOf({
+        selection,
+        message: assistantTextOf(typeof nodes?.get === 'function' ? nodes.get(nodeKey) : undefined),
+        neighbors: neighborContextOf({ nodes, timeline, locations }, nodeKey),
+        recent: recentTurnsOf({ nodes, timeline, locations }, nodeKey, RECENT_LIMIT),
+        stats: detailUsable ? detailStats : null,
+      })
+      const stripReadout = stripState === 'off'
+        ? translate('detailOff')
+        : stripState === 'loading'
+          ? translate('detailLoading')
+          : stripState === 'degraded'
+            ? translate('detailDegraded')
+            : fillTemplate(translate('detailOn'), { turns: detailStats?.turns ?? 0 })
+      const stripNote = stripState === 'off'
+        ? translate('detailNoteOff')
+        : stripState === 'degraded' || stripState === 'loading'
+          ? translate('detailNoteDegraded')
+          : fillTemplate(translate('detailNoteOn'), { first: detailStats?.firstTurn ?? '—' })
+
+      /** One row of the popup: label, dotted leader, value. */
+      const stripRow = (id, label, value, flags = {}) => h('div', {
+        key: id,
+        className: `clipchat-strip__row${flags.isNew === true ? ' is-new' : ''}${flags.isOff === true ? ' is-off' : ''}`,
+      },
+        h('span', { className: 'clipchat-strip__k' }, label),
+        h('span', { className: 'clipchat-strip__dots' }),
+        h('span', { className: 'clipchat-strip__v' }, value))
+
+      const stripLabelOf = {
+        selection: translate('ctxSelection'),
+        message: translate('ctxMessage'),
+        neighbors: translate('ctxNeighbors'),
+        recent: translate('ctxRecent'),
+        turns: translate('ctxTurns'),
+        tools: translate('ctxTools'),
+        summary: translate('ctxSummary'),
+      }
+
+      const detailStrip = h('div', {
+        className: `clipchat-strip${stripState === 'on' ? ' is-on' : ''}${stripState === 'degraded' || stripState === 'loading' ? ' is-degraded' : ''}`,
+        title: stripNote,
+      },
+        h('button', {
+          type: 'button',
+          className: 'clipchat-strip__switch',
+          role: 'switch',
+          'aria-checked': detail,
+          'aria-label': translate('detailHint'),
+          onMouseDown: (event) => event.preventDefault(),
+          onClick: () => setDetail((on) => !on),
+        }),
+        h('span', { className: 'clipchat-strip__label' }, translate('detail')),
+        h('span', { className: 'clipchat-strip__sep' }, '·'),
+        h('span', { className: 'clipchat-strip__readout' }, stripReadout),
+        h('button', {
+          type: 'button',
+          className: 'clipchat-strip__more',
+          'aria-label': translate('detailMore'),
+          'aria-expanded': detailOpen,
+          onMouseDown: (event) => event.preventDefault(),
+          onClick: () => setDetailOpen((open) => !open),
+        }, translate('detailMore')),
+        h('div', {
+          className: `clipchat-strip__detail${detailOpen ? ' is-pinned' : ''}`,
+          role: 'tooltip',
+        },
+          stripRows.rows.map((row) => stripRow(
+            row.id,
+            stripLabelOf[row.id] ?? row.id,
+            row.unit === 'turns' ? `${row.value} 轮`
+              : row.unit === 'times' ? `${row.value} 次`
+                : `${row.value.toLocaleString()} 字`,
+            row,
+          )),
+          h('div', { className: 'clipchat-strip__foot', title: stripNote },
+            fillTemplate(translate('detailTotal'), {
+              chars: `${stripRows.chars.toLocaleString()} 字`,
+              tokens: `≈${(stripRows.tokens / 1000).toFixed(1)}k tok`,
+            }))))
 
       /** Inline markup: only `**bold**` and `` `code` `` are styled. */
       const inlineView = (text, prefix) => inlineParts(text).map((part, index) => {
@@ -2360,6 +2631,8 @@ window.__ModuleLoader__.load({
             onClick: streaming ? () => controllerRef.current?.abort() : send,
           }, streaming ? '■' : '↑')),
 
+        detailStrip,
+
         h('div', { className: 'clipchat-card__footer' },
           h('div', { className: 'clipchat-card__modelwrap' },
             h('button', {
@@ -2561,6 +2834,8 @@ window.__ModuleLoader__.load({
         threadTurns,
         turnOf,
         presetDisabled,
+        fillTemplate,
+        contextRowsOf,
         askHighlightId,
         recordToggleLabel,
         recordIdsOfHighlight,
