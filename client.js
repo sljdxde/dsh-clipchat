@@ -200,19 +200,24 @@ window.__ModuleLoader__.load({
 .clipchat-card__note{padding:0 16px 10px}
 .clipchat-actions__btn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:12px;cursor:pointer;border-radius:999px;padding:4px 10px;transition:background .12s ease,color .12s ease,border-color .12s ease}
 .clipchat-actions__btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
-.clipchat-actions__btn[aria-pressed='true']{color:var(--dsw-alias-brand-primary,#2f6fed);border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 45%, var(--dsw-alias-border-l3));background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 10%, transparent)}
+.clipchat-actions__btn[aria-pressed='true']{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12))}
 .clipchat-actions__btn:disabled{opacity:.5;cursor:default}
-.clipchat-card__records{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding:10px 16px 14px;margin:0}
-.clipchat-card__record{flex:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.04))}
+.clipchat-card__records{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding:10px 16px 14px;margin:0}
+.clipchat-card.is-records .clipchat-card__presets,.clipchat-card.is-records .clipchat-card__thread{display:none}
+.clipchat-card.is-records .clipchat-card__records{border-top:none}
+.clipchat-card__record{flex:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.04));transition:border-color .12s ease,background .12s ease}
+.clipchat-card__record:hover{border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 35%, var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card__record-head{display:flex;align-items:center;gap:6px}
-.clipchat-card__record-selection{flex:1;min-width:0;opacity:.7;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-card__record-selection{flex:1;min-width:0;opacity:.75;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clipchat-card__tag{font-size:10px;border-radius:999px;padding:1px 6px;background:color-mix(in srgb, var(--dsw-alias-brand-primary, #2f6fed) 18%, transparent);white-space:nowrap}
-.clipchat-card__record-q,.clipchat-card__record-a{white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;font-size:12px}
-.clipchat-card__record-a{opacity:.75}
-.clipchat-card__record-del{align-self:flex-end;border:none;background:transparent;color:inherit;opacity:.7;font:var(--dsw-font-xs-13);cursor:pointer;padding:0 2px}
-.clipchat-card__record-del:hover{opacity:1}
+.clipchat-card__record-q{font-size:12.5px;font-weight:600;line-height:1.5;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.clipchat-card__record-a{font-size:12.5px;line-height:1.6;opacity:.75;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3}
+.clipchat-card__record-meta{font-size:11px;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clipchat-card__record-del{flex:none;border:1px solid transparent;background:transparent;color:inherit;opacity:.55;font-size:11.5px;cursor:pointer;border-radius:999px;padding:1px 7px;transition:opacity .12s ease,background .12s ease}
+.clipchat-card__record:hover .clipchat-card__record-del,.clipchat-card__record-del:focus-visible{opacity:1}
+.clipchat-card__record-del:hover{opacity:1;background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card__records-empty{opacity:.6;font-size:11px}
-.clipchat-records__tabs{flex:none;display:flex;gap:6px;align-items:center}
+.clipchat-records__tabs{flex:none;display:flex;gap:6px;align-items:center;position:sticky;top:-10px;padding:4px 0 6px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));z-index:1}
 .clipchat-records__tab{border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:12px;cursor:pointer;border-radius:999px;padding:4px 10px;transition:background .12s ease,color .12s ease,border-color .12s ease}
 .clipchat-records__tab:hover{color:var(--dsw-alias-label-primary)}
 .clipchat-records__tab.on{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1));border-color:var(--dsw-alias-border-l3)}
@@ -1634,17 +1639,22 @@ window.__ModuleLoader__.load({
           }, snippetOf(entry.selection, 60)),
           isCurrentSelection(entry, selection)
             ? h('span', { className: 'clipchat-card__tag' }, translate('currentSelection'))
-            : null),
+            : null,
+          h('button', {
+            type: 'button',
+            className: 'clipchat-card__record-del',
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: () => deleteRecord(entry.id),
+          }, translate('deleteRecord'))),
         h('div', { className: 'clipchat-card__record-q', title: entry.question },
-          snippetOf(entry.question, 160)),
+          snippetOf(entry.question, 200)),
         h('div', { className: 'clipchat-card__record-a', title: entry.answer },
-          snippetOf(entry.answer, 220)),
-        h('button', {
-          type: 'button',
-          className: 'clipchat-card__record-del',
-          onMouseDown: (event) => event.preventDefault(),
-          onClick: () => deleteRecord(entry.id),
-        }, translate('deleteRecord')),
+          snippetOf(entry.answer, 400)),
+        h('div', { className: 'clipchat-card__record-meta' },
+          [
+            entry.provider && entry.model ? `${entry.provider}/${entry.model}` : entry.model,
+            dateTextOf(entry.createdAt),
+          ].filter(Boolean).join(' · ')),
       )
 
       const onKeyDown = (event) => {
@@ -1754,7 +1764,7 @@ window.__ModuleLoader__.load({
 
       return h('div', {
         ref: cardRef,
-        className: 'clipchat-card',
+        className: `clipchat-card${recordsOpen ? ' is-records' : ''}`,
         tabIndex: -1,
         onMouseDown: (event) => {
           const target = event.target
@@ -1778,6 +1788,46 @@ window.__ModuleLoader__.load({
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => dismiss(),
           }, '×')),
+        h('div', { className: 'clipchat-card__records' },
+          h('div', { className: 'clipchat-records__tabs' },
+            h('button', {
+              type: 'button',
+              className: `clipchat-records__tab${recordsView === 'session' ? ' on' : ''}`,
+              'aria-pressed': recordsView === 'session',
+              onClick: () => setRecordsView('session'),
+            }, `${translate('recordsSession')} ${recordEntries.length}`),
+            h('button', {
+              type: 'button',
+              className: `clipchat-records__tab${recordsView === 'all' ? ' on' : ''}`,
+              'aria-pressed': recordsView === 'all',
+              onClick: () => setRecordsView('all'),
+            }, search.state === 'idle' && search.total > 0 ? `${translate('recordsAll')} ${search.total}` : translate('recordsAll'))),
+          recordsView === 'session'
+            ? (recordEntries.length === 0
+              ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
+              : recordEntries.map(recordRow))
+            : h('div', { className: 'clipchat-search' },
+              h('input', {
+                className: 'clipchat-search__input',
+                type: 'search',
+                value: search.query,
+                placeholder: translate('searchPlaceholder'),
+                'aria-label': translate('searchPlaceholder'),
+                onChange: (event) => search.setQuery(event.target.value),
+              }),
+              search.state === 'loading'
+                ? h('div', { className: 'clipchat-card__hint' }, translate('searchLoading'))
+                : null,
+              search.state === 'error'
+                ? h('div', { className: 'clipchat-card__error', role: 'alert' }, translate('searchFailed'))
+                : null,
+              search.state === 'idle' && search.results.length === 0
+                ? h('div', { className: 'clipchat-card__hint' }, translate('searchEmpty'))
+                : null,
+              search.state === 'idle' && search.results.length > 0 && search.truncated
+                ? h('div', { className: 'clipchat-card__hint' }, translate('searchTruncated'))
+                : null,
+              search.results.map(searchRow)),        ),
 
         h('div', { className: 'clipchat-card__presets' },
           presetEntries.map((preset) => h('button', {
@@ -1898,47 +1948,6 @@ window.__ModuleLoader__.load({
           : insertState === 'inserted'
             ? h('div', { className: 'clipchat-card__hint clipchat-card__note' }, translate('inserted'))
             : null,
-        recordsOpen ? h('div', { className: 'clipchat-card__records' },
-          h('div', { className: 'clipchat-records__tabs' },
-            h('button', {
-              type: 'button',
-              className: `clipchat-records__tab${recordsView === 'session' ? ' on' : ''}`,
-              'aria-pressed': recordsView === 'session',
-              onClick: () => setRecordsView('session'),
-            }, `${translate('recordsSession')} ${recordEntries.length}`),
-            h('button', {
-              type: 'button',
-              className: `clipchat-records__tab${recordsView === 'all' ? ' on' : ''}`,
-              'aria-pressed': recordsView === 'all',
-              onClick: () => setRecordsView('all'),
-            }, search.state === 'idle' && search.total > 0 ? `${translate('recordsAll')} ${search.total}` : translate('recordsAll'))),
-          recordsView === 'session'
-            ? (recordEntries.length === 0
-              ? h('div', { className: 'clipchat-card__records-empty' }, translate('noRecords'))
-              : recordEntries.map(recordRow))
-            : h('div', { className: 'clipchat-search' },
-              h('input', {
-                className: 'clipchat-search__input',
-                type: 'search',
-                value: search.query,
-                placeholder: translate('searchPlaceholder'),
-                'aria-label': translate('searchPlaceholder'),
-                onChange: (event) => search.setQuery(event.target.value),
-              }),
-              search.state === 'loading'
-                ? h('div', { className: 'clipchat-card__hint' }, translate('searchLoading'))
-                : null,
-              search.state === 'error'
-                ? h('div', { className: 'clipchat-card__error', role: 'alert' }, translate('searchFailed'))
-                : null,
-              search.state === 'idle' && search.results.length === 0
-                ? h('div', { className: 'clipchat-card__hint' }, translate('searchEmpty'))
-                : null,
-              search.state === 'idle' && search.results.length > 0 && search.truncated
-                ? h('div', { className: 'clipchat-card__hint' }, translate('searchTruncated'))
-                : null,
-              search.results.map(searchRow)),
-        ) : null,
       )
     }
 
