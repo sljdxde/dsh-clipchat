@@ -76,11 +76,13 @@ window.__ModuleLoader__.load({
       detail: '详细',
       detailHint: '开启后注入整段会话的历史',
       detailOff: '近 3 轮',
-      detailOn: '全史 {turns} 轮',
+      detailOn: '全部 {turns} 轮',
       detailDegraded: '降级 · 退回近 3 轮',
       detailLoading: '读取历史…',
       detailFailed: '历史读取失败，已退回近轮上下文',
       detailMore: '明细',
+      detailHead: '本次注入',
+      detailAdded: '详细模式追加',
       detailRows: '注入内容',
       detailTotal: '合计 {chars} · {tokens}',
       detailNoteOff: '只给这一段附近的上下文，不含工具调用与更早的轮次',
@@ -167,6 +169,8 @@ window.__ModuleLoader__.load({
       detailLoading: 'reading history…',
       detailFailed: 'History unavailable, fell back to nearby turns',
       detailMore: 'details',
+      detailHead: 'injected now',
+      detailAdded: 'added by detailed mode',
       detailRows: 'Injected',
       detailTotal: '{chars} · {tokens}',
       detailNoteOff: 'Nearby context only; no tool calls, no earlier turns',
@@ -198,16 +202,26 @@ window.__ModuleLoader__.load({
 .clipchat-menu{display:flex;align-items:center;gap:6px}
 .clipchat-menu__ask{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);cursor:pointer;border-radius:999px;padding:5px 10px}
 .clipchat-menu__ask:hover{background:var(--dsw-alias-button-floating-hover)}
-.clipchat-card{width:min(600px,calc(100vw - 32px));max-height:min(520px,64vh);box-sizing:border-box;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:14px;box-shadow:var(--dsw-elevation-panel,0 12px 40px -12px rgba(0,0,0,.3));display:flex;flex-direction:column;animation:clipchat-pop .16s ease-out}
+.clipchat-card{position:relative;width:min(600px,calc(100vw - 32px));max-height:min(520px,64vh);box-sizing:border-box;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:14px;display:flex;flex-direction:column;animation:clipchat-pop .16s ease-out;
+/* Frosted glass: a translucent fill, the page blurred behind it, and a
+   brighter top edge so the panel reads as a raised sheet rather than a box. */
+background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 78%,transparent);
+-webkit-backdrop-filter:blur(24px) saturate(180%);
+backdrop-filter:blur(24px) saturate(180%);
+box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px rgba(0,0,0,.18),0 32px 64px -24px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.5)}
+.clipchat-card::before{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.22),transparent 42%)}
+@media (prefers-color-scheme:dark){.clipchat-card{background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#1c1c1e) 82%,transparent);box-shadow:0 0 0 .5px rgba(255,255,255,.08),0 1px 2px rgba(0,0,0,.4),0 12px 28px -8px rgba(0,0,0,.5),0 32px 64px -24px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.09)}
+.clipchat-card::before{background:linear-gradient(180deg,rgba(255,255,255,.07),transparent 42%)}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.clipchat-card{background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill))}}
 @keyframes clipchat-pop{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.clipchat-card{animation:none}}
-.clipchat-card__bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary,#666)}
+.clipchat-card__bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary,#666);border-radius:14px 14px 0 0;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 45%,transparent)}
 .clipchat-card__mark{flex:none;font-size:12px;line-height:1;color:var(--dsw-alias-brand-primary,#2f6fed)}
 .clipchat-card__bar-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;line-height:1.5}
 .clipchat-card__close{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:4px 6px;border-radius:7px;transition:background .12s ease,color .12s ease}
 .clipchat-card__close:hover{background:var(--dsw-alias-button-floating-hover);color:var(--dsw-alias-label-primary)}
 .clipchat-card__presets{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 4px}
-.clipchat-card__preset{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-secondary,#666);border-radius:999px;padding:4px 11px;font:var(--dsw-font-xs-13);line-height:1.4;cursor:pointer;transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease}
+.clipchat-card__preset{border:1px solid var(--dsw-alias-border-l3);background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 68%,transparent);color:var(--dsw-alias-label-secondary,#666);border-radius:999px;padding:4px 11px;font:var(--dsw-font-xs-13);line-height:1.4;cursor:pointer;box-shadow:0 1px 1.5px rgba(0,0,0,.04);transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease,box-shadow .12s ease}
 .clipchat-card__preset:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover);transform:translateY(-1px)}
 .clipchat-card__preset:disabled{opacity:.5;cursor:default}
 .clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:12px 16px 12px}
@@ -237,13 +251,14 @@ window.__ModuleLoader__.load({
 .clipchat-card__cursor{display:inline-block;margin-left:1px;animation:clipchat-blink 1s step-end infinite}
 @keyframes clipchat-blink{50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.clipchat-card__cursor{animation:none}}
-.clipchat-card__composer{display:flex;gap:8px;align-items:flex-end;padding:8px 16px;border-top:1px solid var(--dsw-alias-border-l3)}
+.clipchat-card__composer{display:flex;gap:8px;align-items:flex-end;padding:8px 16px;border-top:1px solid var(--dsw-alias-border-l3);background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent)}
 .clipchat-card__ta{flex:1;min-width:0;box-sizing:border-box;resize:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:13.5px;line-height:1.5;padding:8px 10px;min-height:36px;max-height:140px;overflow:auto;transition:border-color .12s ease,box-shadow .12s ease}
 .clipchat-card__ta:focus{outline:none;border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 50%, var(--dsw-alias-border-l3));box-shadow:0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 12%, transparent)}
 .clipchat-card__send{flex:none;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));font:inherit;font-size:15px;cursor:pointer;border-radius:10px;padding:0;transition:opacity .12s ease,transform .12s ease,background .12s ease}
 .clipchat-card__send:hover:not(:disabled){transform:translateY(-1px)}
 .clipchat-card__send:disabled{background:transparent;color:var(--dsw-alias-label-primary);opacity:.45;cursor:default}
-.clipchat-strip{position:relative;display:flex;align-items:center;gap:7px;box-sizing:border-box;margin:0 16px 2px;padding:0 9px;height:30px;min-height:30px;line-height:1;border:1px solid transparent;border-radius:8px;transition:background .16s ease,border-color .16s ease}
+.clipchat-strip{position:relative;display:flex;align-items:center;box-sizing:border-box;margin:0 16px 2px;padding:0 7px 0 9px;height:30px;min-height:30px;line-height:1;border:1px solid transparent;border-radius:8px;transition:background .16s ease,border-color .16s ease}
+.clipchat-strip__title{display:flex;align-items:center;gap:6px;flex:none;cursor:pointer;border-radius:5px;outline-offset:1px}
 .clipchat-strip:hover{border-color:var(--dsw-alias-border-l3)}
 .clipchat-strip.is-on{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 7%, transparent);border-color:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 26%, transparent)}
 .clipchat-strip.is-degraded{background:color-mix(in srgb, #b0741c 7%, transparent);border-color:color-mix(in srgb, #b0741c 28%, transparent)}
@@ -252,18 +267,26 @@ window.__ModuleLoader__.load({
 .clipchat-strip__switch[aria-checked="true"]{background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 12%, transparent);border-color:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip__switch[aria-checked="true"]::after{transform:translateX(11px);background:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip__switch:focus-visible{outline:2px solid var(--dsw-alias-state-success-primary,#1f9d63);outline-offset:2px}
-.clipchat-strip__label{font-size:11.5px;font-weight:500;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;cursor:pointer}
+.clipchat-strip__label{font-size:11.5px;font-weight:500;letter-spacing:.01em;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;cursor:pointer}
 .clipchat-strip.is-on .clipchat-strip__label{color:var(--dsw-alias-state-success-primary,#1f9d63);font-weight:600}
 .clipchat-strip.is-degraded .clipchat-strip__label{color:#b0741c;font-weight:600}
-.clipchat-strip__sep{color:var(--dsw-alias-border-l3);font-size:10px}
-.clipchat-strip__readout{font-size:11px;line-height:1.3;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.clipchat-strip.is-on .clipchat-strip__readout{color:var(--dsw-alias-state-success-primary,#1f9d63)}
-.clipchat-strip.is-degraded .clipchat-strip__readout{color:#b0741c}
-.clipchat-strip__more{flex:none;margin-left:auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:10.5px;line-height:1;padding:3px 4px;border-radius:5px;cursor:pointer;opacity:.75;transition:opacity .12s ease,background .12s ease}
-.clipchat-strip__label,.clipchat-strip__readout,.clipchat-strip__sep{line-height:1}
+/* A rule, not punctuation: it separates the control from the value it sets. */
+.clipchat-strip__sep{flex:none;width:1px;height:11px;margin:0 8px;border-radius:1px;background:var(--dsw-alias-border-l3)}
+.clipchat-strip__readout{flex:0 1 auto;min-width:0;font-size:11.5px;font-weight:500;line-height:1.3;font-variant-numeric:tabular-nums;letter-spacing:.01em;color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clipchat-strip.is-on .clipchat-strip__readout{color:var(--dsw-alias-state-success-primary,#1f9d63);font-weight:600}
+.clipchat-strip.is-degraded .clipchat-strip__readout{color:#b0741c;font-weight:600}
+.clipchat-strip__more{display:inline-flex;align-items:center;gap:3px;flex:none;margin-left:auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:10px;line-height:1;padding:3px 5px;border-radius:5px;cursor:pointer;opacity:.6;transition:opacity .12s ease,background .12s ease}
+.clipchat-strip__more::after{content:'';width:0;height:0;border-left:3px solid currentColor;border-top:3px solid transparent;border-bottom:3px solid transparent;transform:rotate(90deg);transition:transform .16s ease}
+.clipchat-strip__more[aria-expanded="true"]{opacity:1;background:var(--dsw-alias-button-floating-hover)}
+.clipchat-strip__more[aria-expanded="true"]::after{transform:rotate(-90deg)}
+.clipchat-strip__label,.clipchat-strip__readout{line-height:1}
 .clipchat-strip__more:hover{opacity:1;background:var(--dsw-alias-button-floating-hover)}
-.clipchat-strip__detail{position:absolute;left:0;bottom:calc(100% + 5px);z-index:4;width:262px;padding:7px 9px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));border:1px solid var(--dsw-alias-border-l3);border-radius:8px;box-shadow:var(--dsw-elevation-panel);opacity:0;transform:translateY(3px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+.clipchat-strip__detail{position:absolute;left:0;bottom:calc(100% + 6px);z-index:4;width:268px;padding:9px 11px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 80%,transparent);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 8px 24px -6px rgba(0,0,0,.18),0 20px 44px -16px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.45);opacity:0;transform:translateY(4px) scale(.99);transform-origin:bottom left;pointer-events:none;transition:opacity .14s ease,transform .14s ease}
 .clipchat-strip:hover .clipchat-strip__detail,.clipchat-strip:focus-within .clipchat-strip__detail,.clipchat-strip__detail.is-pinned{opacity:1;transform:none;pointer-events:auto}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.clipchat-strip__detail,.clipchat-card__modelmenu{background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill))}}
+.clipchat-strip__head{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666);opacity:.7;margin-bottom:5px}
+.clipchat-strip__group+.clipchat-strip__group{margin-top:7px;padding-top:7px;border-top:1px dashed var(--dsw-alias-border-l3)}
+.clipchat-strip__grouptag{font-size:9.5px;font-weight:600;letter-spacing:.04em;color:var(--dsw-alias-state-success-primary,#1f9d63);margin-bottom:3px}
 .clipchat-strip__row{display:flex;align-items:baseline;gap:6px;padding:1px 0;font-size:10.5px;line-height:1.45}
 .clipchat-strip__k{color:var(--dsw-alias-label-secondary,#666);white-space:nowrap}
 .clipchat-strip__k::before{content:'·';margin-right:5px;opacity:.5}
@@ -276,13 +299,13 @@ window.__ModuleLoader__.load({
 .clipchat-strip.is-on .clipchat-strip__foot b{color:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip.is-degraded .clipchat-strip__foot b{color:#b0741c}
 @media (prefers-reduced-motion:reduce){.clipchat-strip__detail{transition:none}}
-.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;padding:0 16px 12px;min-width:0}
+.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;padding:0 16px 12px;min-width:0;background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent);border-radius:0 0 14px 14px}
 .clipchat-card__footer>*{flex:none}
 .clipchat-card__footer .clipchat-card__spacer{flex:1 1 0;min-width:4px}
 .clipchat-card__modelwrap{position:relative;flex:0 1 auto;min-width:0;display:flex}
 .clipchat-card__modelbtn{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:11.5px;cursor:pointer;border-radius:999px;padding:3px 9px;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:background .12s ease,color .12s ease}
 .clipchat-card__modelbtn:hover{background:var(--dsw-alias-button-floating-hover);color:var(--dsw-alias-label-primary)}
-.clipchat-card__modelmenu{position:absolute;left:0;bottom:calc(100% + 6px);z-index:3;min-width:200px;max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:5px;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));border:1px solid var(--dsw-alias-border-l3);border-radius:10px;box-shadow:var(--dsw-elevation-panel)}
+.clipchat-card__modelmenu{position:absolute;left:0;bottom:calc(100% + 7px);z-index:3;min-width:208px;max-height:264px;overflow:auto;display:flex;flex-direction:column;gap:1px;padding:5px;border:1px solid var(--dsw-alias-border-l3);border-radius:11px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 80%,transparent);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 8px 24px -6px rgba(0,0,0,.18),0 20px 44px -16px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.45)}
 .clipchat-card__modelitem{flex:none;border:none;background:transparent;color:inherit;font:var(--dsw-font-xs-13);text-align:left;padding:7px 9px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .12s ease,color .12s ease}
 .clipchat-card__modelitem:hover{background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card__modelitem.on{color:var(--dsw-alias-brand-primary,#2f6fed);background:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 10%, transparent);font-weight:600}
@@ -469,6 +492,8 @@ window.__ModuleLoader__.load({
     /** Stored highlights keyed by id: `{ id, anchor, createdAt }`. */
     const highlights = new Map()
     let pendingHighlightId = null
+    /** Until when the eased scroll owns the column's `scrollTop`. */
+    let scrollBusyUntil = 0
     /** Highlight whose underline should flash on the next render. */
     let pendingFlashId = null
     let nextHighlightId = 1
@@ -484,6 +509,31 @@ window.__ModuleLoader__.load({
     let observerTimer
     let observerOptions = { childList: true, subtree: true, characterData: true }
 
+    /**
+     * Whether two spans of one node cover any of the same characters.
+     *
+     * Two selections of "the same passage" are rarely identical: a drag can end
+     * one character early, and re-selecting after a reload lands on slightly
+     * different offsets. Treating only exact text as the same passage created a
+     * second highlight — and a second record — for what the reader sees as one.
+     *
+     * @param {object} left - one anchor.
+     * @param {object} right - another anchor.
+     * @returns {boolean} whether they overlap.
+     */
+    function anchorsOverlap(left, right) {
+      if (left?.nodeKey !== right?.nodeKey) return false
+      const leftSpans = Array.isArray(left?.spans) ? left.spans : []
+      const rightSpans = Array.isArray(right?.spans) ? right.spans : []
+      for (const a of leftSpans) {
+        for (const b of rightSpans) {
+          if (a.blockIndex !== b.blockIndex) continue
+          if (a.start < b.end && b.start < a.end) return true
+        }
+      }
+      return false
+    }
+
     /** @returns {string | null} id of the highlight covering this exact passage. */
     function highlightIdOf(nodeKey, text) {
       for (const [id, entry] of highlights) {
@@ -493,9 +543,27 @@ window.__ModuleLoader__.load({
       return null
     }
 
-    /** @returns {boolean} whether this exact passage already has a highlight. */
-    function hasHighlight(nodeKey, text) {
-      return highlightIdOf(nodeKey, text) !== null
+    /**
+     * Highlight covering this passage, by exact text first and then by overlap.
+     *
+     * @param {string} nodeKey - chat node key.
+     * @param {string} text - selected text.
+     * @param {object | null} [anchor] - the live selection's anchor, when known.
+     * @returns {string | null} the highlight id, or null.
+     */
+    function highlightIdFor(nodeKey, text, anchor = null) {
+      const exact = highlightIdOf(nodeKey, text)
+      if (exact !== null) return exact
+      if (anchor === null || anchor === undefined) return null
+      for (const [id, entry] of highlights) {
+        if (anchorsOverlap(entry?.anchor, anchor)) return id
+      }
+      return null
+    }
+
+    /** @returns {boolean} whether this passage already has a highlight. */
+    function hasHighlight(nodeKey, text, anchor = null) {
+      return highlightIdFor(nodeKey, text, anchor) !== null
     }
 
     /**
@@ -790,7 +858,7 @@ window.__ModuleLoader__.load({
      */
     function addHighlight(anchor, model = null) {
       if (anchor === null) return null
-      if (hasHighlight(anchor.nodeKey, anchor.text)) return null
+      if (hasHighlight(anchor.nodeKey, anchor.text, anchor)) return null
       const entry = {
         id: newHighlightId(),
         anchor: Object.assign({}, anchor),
@@ -823,11 +891,22 @@ window.__ModuleLoader__.load({
      */
     async function loadSession(sessionId) {
       const token = ++loadToken
-      highlights.clear()
-      records.clear()
+      const switched = loadedSessionId !== (sessionId ?? null)
       loadedSessionId = sessionId ?? null
-      renderAll()
-      if (typeof sessionId !== 'string' || sessionId.length === 0) return
+      // A different session must not keep the old underlines on screen, but the
+      // same session must not lose them while its state is being re-read: the
+      // overlay would blink empty on every refresh. Only a real switch clears.
+      if (switched) {
+        highlights.clear()
+        records.clear()
+        renderAll()
+      }
+      if (typeof sessionId !== 'string' || sessionId.length === 0) {
+        highlights.clear()
+        records.clear()
+        renderAll()
+        return
+      }
       if (typeof fetch !== 'function') return
       try {
         const response = await fetch(`${SESSION_PATH}?sessionId=${encodeURIComponent(sessionId)}`)
@@ -1057,6 +1136,76 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * How far to scroll so one line sits in the middle of the column.
+     * @param {Element} line - the underline.
+     * @param {Element} scroller - the conversation column.
+     * @returns {number | null} pixels to add to `scrollTop`, or null when unmeasurable.
+     */
+    function centreDeltaOf(line, scroller) {
+      const box = line.getBoundingClientRect()
+      const view = scroller.getBoundingClientRect()
+      if (box.height <= 0) return null
+      const delta = box.top - view.top - (scroller.clientHeight - box.height) / 2
+      return Number.isFinite(delta) ? delta : null
+    }
+
+    /**
+     * Ease a scroller by `delta` pixels, with a slight overshoot and settle.
+     *
+     * A plain `scrollTop += delta` reads as a jump cut. Two things make it feel
+     * physical: the motion eases out instead of stopping dead, and it travels a
+     * few percent past the target before easing back, the way a heavy sheet
+     * settles. The overshoot is capped so a long jump does not fling the view.
+     *
+     * @param {Element} scroller - the conversation column.
+     * @param {number} delta - pixels to travel; positive scrolls down.
+     * @param {{ duration?: number, overshoot?: number }} [options] - tuning.
+     * @returns {void}
+     */
+    function animateScroll(scroller, delta, options = {}) {
+      if (typeof requestAnimationFrame !== 'function' || Math.abs(delta) < 1) {
+        if (Math.abs(delta) >= 1) scroller.scrollTop += delta
+        return
+      }
+      const duration = options.duration ?? 520
+      // Claim the column for the duration: the virtualiser and the hold loop
+      // both write `scrollTop`, and a write mid-animation shows up as a jump.
+      scrollBusyUntil = performance.now() + duration
+      // The overshoot is a finish, not a lurch: a small fixed budget that a long
+      // jump does not amplify. The settle below is what reads as weight.
+      const overshoot = Math.min(options.overshoot ?? 14, Math.abs(delta) * 0.02)
+      const start = scroller.scrollTop
+      const peak = delta + Math.sign(delta) * overshoot
+      const begin = performance.now()
+
+      // Ease-out-quint for the approach, then a short damped return from the
+      // overshoot. Splitting the two is what gives the settle its weight.
+      const approach = 0.72
+      const step = (now) => {
+        const elapsed = (now - begin) / duration
+        if (elapsed >= 1) {
+          scroller.scrollTop = start + delta
+          scrollBusyUntil = 0
+          return
+        }
+        let travelled
+        if (elapsed < approach) {
+          const t = elapsed / approach
+          travelled = peak * (1 - (1 - t) ** 5)
+        } else {
+          const t = (elapsed - approach) / (1 - approach)
+          // Back out of the overshoot with a decelerating curve.
+          const from = peak
+          const settle = 1 - (1 - t) ** 3
+          travelled = from + (delta - from) * settle
+        }
+        scroller.scrollTop = start + travelled
+        requestAnimationFrame(step)
+      }
+      requestAnimationFrame(step)
+    }
+
+    /**
      * Centre a highlight line in the conversation column.
      *
      * The host centres the whole turn, which can leave a short passage near an
@@ -1070,11 +1219,9 @@ window.__ModuleLoader__.load({
       if (typeof document === 'undefined' || !Array.isArray(lines) || lines.length === 0) return
       const scroller = document.querySelector('[data-conversation-scroll]')
       if (scroller === null || scroller === undefined) return
-      const box = lines[0].getBoundingClientRect()
-      const view = scroller.getBoundingClientRect()
-      if (box.height <= 0) return
-      const delta = box.top - view.top - (scroller.clientHeight - box.height) / 2
-      if (Number.isFinite(delta) && Math.abs(delta) > 4) scroller.scrollTop += delta
+      const delta = centreDeltaOf(lines[0], scroller)
+      if (delta === null) return
+      animateScroll(scroller, delta)
     }
 
     /**
@@ -1092,18 +1239,26 @@ window.__ModuleLoader__.load({
     function holdCentred(linesOf, until) {
       const scroller = document.querySelector('[data-conversation-scroll]')
       if (scroller === null || scroller === undefined) return
+      // The virtualiser re-applies its own correction for a few frames after a
+      // jump. Instead of snapping back each time, take a fraction of the
+      // remaining distance per frame: the two corrections converge instead of
+      // fighting, and the view drifts into place rather than twitching.
+      const ease = 0.28
       const step = () => {
+        // An eased move in flight owns the column; wait for it to land.
+        if (performance.now() < scrollBusyUntil) {
+          if (Date.now() < until) requestAnimationFrame(step)
+          return
+        }
         const lines = linesOf()
         const line = lines[0]
         if (line !== undefined) {
-          const box = line.getBoundingClientRect()
-          const view = scroller.getBoundingClientRect()
-          if (box.height > 0) {
-            const delta = box.top - view.top - (scroller.clientHeight - box.height) / 2
-            if (Number.isFinite(delta) && Math.abs(delta) > 2) scroller.scrollTop += delta
+          const delta = centreDeltaOf(line, scroller)
+          if (delta !== null && Math.abs(delta) > 0.5) {
+            scroller.scrollTop += delta * ease
           }
         }
-        if (Date.now() < until) setTimeout(step, 100)
+        if (Date.now() < until) requestAnimationFrame(step)
       }
       step()
     }
@@ -1940,7 +2095,7 @@ window.__ModuleLoader__.load({
       const [streaming, setStreaming] = React.useState(false)
       const [asked, setAsked] = React.useState(null)
       const [history, setHistory] = React.useState([])
-      const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection))
+      const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection, anchor))
       const [model, setModel] = React.useState(() => storedModelOf(nodeKey, selection))
       const [modelList, setModelList] = React.useState([])
       const [modelMenuOpen, setModelMenuOpen] = React.useState(false)
@@ -2238,7 +2393,7 @@ window.__ModuleLoader__.load({
         const next = choice !== undefined && choice.model !== null ? normalizeModelRoute(choice) : null
         setModel(next)
 
-        const id = highlightIdOf(nodeKey, selection)
+        const id = highlightIdFor(nodeKey, selection, anchor)
         if (id === null) return
         const entry = highlights.get(id)
         if (entry === undefined) return
@@ -2257,7 +2412,7 @@ window.__ModuleLoader__.load({
        * @returns {string | null} the stored record id.
        */
       const keepAnswer = (question, answer, usage, route) => {
-        const highlightId = highlightIdOf(nodeKey, selection)
+        const highlightId = highlightIdFor(nodeKey, selection, anchor)
         // One record per highlight: a second question about the same passage
         // appends a turn instead of creating a second record.
         const existing = highlightId === null ? null : recordForHighlight(highlightId, selection)
@@ -2481,21 +2636,38 @@ window.__ModuleLoader__.load({
         summary: translate('ctxSummary'),
       }
 
+      /** One popup row, with its unit spelled out. */
+      const stripRowOf = (row) => stripRow(
+        row.id,
+        stripLabelOf[row.id] ?? row.id,
+        row.unit === 'turns' ? `${row.value} 轮`
+          : row.unit === 'times' ? `${row.value} 次`
+            : `${row.value.toLocaleString()} 字`,
+        row,
+      )
+
       const detailStrip = h('div', {
         className: `clipchat-strip${stripState === 'on' ? ' is-on' : ''}${stripState === 'degraded' || stripState === 'loading' ? ' is-degraded' : ''}`,
         title: stripNote,
       },
-        h('button', {
-          type: 'button',
-          className: 'clipchat-strip__switch',
-          role: 'switch',
-          'aria-checked': detail,
-          'aria-label': translate('detailHint'),
-          onMouseDown: (event) => event.preventDefault(),
-          onClick: () => setDetail((on) => !on),
-        }),
-        h('span', { className: 'clipchat-strip__label' }, translate('detail')),
-        h('span', { className: 'clipchat-strip__sep' }, '·'),
+        // The switch and its label are one control: clicking either flips it,
+        // and the rule after them separates the control from its value.
+        h('span', { className: 'clipchat-strip__title' },
+          h('button', {
+            type: 'button',
+            className: 'clipchat-strip__switch',
+            role: 'switch',
+            'aria-checked': detail,
+            'aria-label': translate('detailHint'),
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: () => setDetail((on) => !on),
+          }),
+          h('span', {
+            className: 'clipchat-strip__label',
+            onMouseDown: (event) => event.preventDefault(),
+            onClick: () => setDetail((on) => !on),
+          }, translate('detail'))),
+        h('span', { className: 'clipchat-strip__sep', 'aria-hidden': 'true' }),
         h('span', { className: 'clipchat-strip__readout' }, stripReadout),
         h('button', {
           type: 'button',
@@ -2509,14 +2681,16 @@ window.__ModuleLoader__.load({
           className: `clipchat-strip__detail${detailOpen ? ' is-pinned' : ''}`,
           role: 'tooltip',
         },
-          stripRows.rows.map((row) => stripRow(
-            row.id,
-            stripLabelOf[row.id] ?? row.id,
-            row.unit === 'turns' ? `${row.value} 轮`
-              : row.unit === 'times' ? `${row.value} 次`
-                : `${row.value.toLocaleString()} 字`,
-            row,
-          )),
+          h('div', { className: 'clipchat-strip__head' }, translate('detailHead')),
+          // Rows the base context already carries, then the extra rows only
+          // detailed mode adds. The split is what the switch is actually buying.
+          h('div', { className: 'clipchat-strip__group' },
+            stripRows.rows.filter((row) => row.isNew !== true).map((row) => stripRowOf(row))),
+          stripRows.rows.some((row) => row.isNew === true)
+            ? h('div', { className: 'clipchat-strip__group is-added' },
+              h('div', { className: 'clipchat-strip__grouptag' }, translate('detailAdded')),
+              stripRows.rows.filter((row) => row.isNew === true).map((row) => stripRowOf(row)))
+            : null,
           h('div', { className: 'clipchat-strip__foot', title: stripNote },
             fillTemplate(translate('detailTotal'), {
               chars: `${stripRows.chars.toLocaleString()} 字`,
@@ -2769,7 +2943,7 @@ window.__ModuleLoader__.load({
             onMouseDown: (event) => event.preventDefault(),
             onClick: () => {
               if (highlighted) {
-                const id = highlightIdOf(nodeKey, selection)
+                const id = highlightIdFor(nodeKey, selection, anchor)
                 // Removing the highlight also removes the answers kept for this
                 // passage: an unmarked passage should not keep a record behind.
                 const dropped = recordIdsOfHighlight(recordList(), id, selection)
@@ -2946,10 +3120,14 @@ window.__ModuleLoader__.load({
         ClipCard,
         currentSessionIdOf,
         highlightIdOf,
+        highlightIdFor,
+        anchorsOverlap,
         highlightIdOfRecord,
         revealHighlight,
         openHighlight,
         centreInColumn,
+        centreDeltaOf,
+        animateScroll,
         turnOfNodeKey,
         turnOfNode,
         turnOfText,

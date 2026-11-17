@@ -11,18 +11,29 @@ async function makeRoot() {
   return mkdtemp(join(tmpdir(), 'clipchat-store-'))
 }
 
-/** A well-formed anchor as the client captures it. */
-function anchor(text = 'passage') {
+/**
+ * A well-formed anchor as the client captures it.
+ *
+ * `start` defaults to 0, but callers that create several highlights must give
+ * each one its own offset: overlapping anchors are the same passage, and the
+ * store folds them into one.
+ */
+function anchor(text = 'passage', start = 0) {
   return {
     nodeKey: '5:assistant-step1:1',
     sourceIndex: 0,
-    spans: [{ blockIndex: 0, start: 0, end: text.length }],
+    spans: [{ blockIndex: 0, start, end: start + text.length }],
     text,
   }
 }
 
+let highlightSequence = 0
+
 function highlight(id, text = `text-${id}`, createdAt) {
-  const entry = { id, anchor: anchor(text) }
+  // A fresh offset per call, so distinct highlights stay distinct: overlapping
+  // anchors are one passage, and the store folds them together.
+  highlightSequence += 1
+  const entry = { id, anchor: anchor(text, highlightSequence * 1000) }
   if (createdAt !== undefined) entry.createdAt = createdAt
   return entry
 }
@@ -56,7 +67,8 @@ test('adding a highlight persists the version 1 schema with its anchor', async (
   const root = await makeRoot()
   const store = createStore({ root, now: () => 2000 })
 
-  const state = await store.addHighlight('session-a', highlight('h1'))
+  const entry = highlight('h1')
+  const state = await store.addHighlight('session-a', entry)
 
   assert.equal(state.highlights.length, 1)
   const stored = await readState(root, 'session-a')
@@ -66,7 +78,7 @@ test('adding a highlight persists the version 1 schema with its anchor', async (
   assert.deepEqual(stored.records, [])
   assert.deepEqual(stored.highlights, [{
     id: 'h1',
-    anchor: anchor('text-h1'),
+    anchor: entry.anchor,
     createdAt: 2000,
   }])
 })
@@ -507,8 +519,16 @@ test('a rename onto an occupied name fails and leaves no temp file', async () =>
   await mkdir(join(root, 'session-a.json'))
   await writeFile(join(root, 'session-a.json', 'blocker'), 'x')
 
-  await assert.rejects(store.addRecord('session-a', makeRecord('r1')))
+  // Catch it here rather than through assert.rejects: the helper's own frame
+  // swallows the stack V8 uses to attribute the catch block.
+  let thrown = null
+  try {
+    await store.addRecord('session-a', makeRecord('r1'))
+  } catch (error) {
+    thrown = error
+  }
 
+  assert.equal(thrown?.code, 'EISDIR', 'the write failed for the expected reason')
   const names = await readdir(root)
   assert.equal(names.some((name) => name.endsWith('.tmp')), false, 'the temp file was removed')
 })
@@ -569,4 +589,27 @@ test('search skips a state file it is not allowed to read', async () => {
   } finally {
     await chmod(join(root, 'session-locked.json'), 0o600)
   }
+})
+
+test('search stops at the byte cap and reports truncation', async () => {
+  const root = await makeRoot()
+  const store = createStore({ root, now: () => 1000 })
+  // One state file larger than the 8 MB read budget: the reader must stop
+  // before it, rather than load the whole corpus into memory.
+  const big = 'x'.repeat(1024 * 1024)
+  await writeFile(join(root, 'session-huge.json'), JSON.stringify({
+    version: 1,
+    sessionId: 'session-huge',
+    updatedAt: Date.now(),
+    highlights: [],
+    records: Array.from({ length: 9 }, (_, index) => makeRecord(`r${index}`, {
+      turns: [{ question: 'q', answer: big, provider: 'p', model: 'm', createdAt: 1 }],
+    })),
+  }))
+  await store.addRecord('session-small', makeRecord('r-small'))
+
+  const corpus = await store.readAllForSearch()
+
+  assert.equal(corpus.truncated, true, 'the caller is told the corpus is partial')
+  assert.deepEqual(corpus.sessions.map((session) => session.sessionId), [], 'the oversized file was not read')
 })

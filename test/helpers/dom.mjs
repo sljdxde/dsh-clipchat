@@ -22,6 +22,8 @@ const EXTRA_GLOBALS = [
   'MouseEvent',
   'KeyboardEvent',
   'MutationObserver',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
   'getComputedStyle',
   'TextDecoder',
   'TextEncoder',

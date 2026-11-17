@@ -225,7 +225,8 @@ test('trimming to the 1 MB budget keeps every highlight intact', async () => {
   for (let index = 0; index < 3; index += 1) {
     await store.addHighlight('session-a', {
       id: `h${index}`,
-      anchor: { ...anchor, text: `passage-${index}` },
+      // Distinct offsets: overlapping anchors are one passage and would merge.
+      anchor: { ...anchor, spans: [{ blockIndex: 0, start: index * 100, end: index * 100 + 8 }], text: `passage-${index}` },
       createdAt: 10 + index,
     })
   }
@@ -366,7 +367,8 @@ test('a state too large even without records is written with none', async () => 
       anchor: {
         nodeKey: '1:assistant-step1:1',
         sourceIndex: 0,
-        spans: [{ blockIndex: 0, start: 0, end: 7000 }],
+        // One offset per highlight: overlapping anchors merge into one.
+        spans: [{ blockIndex: 0, start: index * 10000, end: index * 10000 + 7000 }],
         text: 'x'.repeat(7000),
       },
       createdAt: 1000 + index,
@@ -378,4 +380,55 @@ test('a state too large even without records is written with none', async () => 
 
   assert.ok(state.highlights.length > 0, 'the highlights survived')
   assert.deepEqual(state.records, [], 'the record was dropped to fit the budget')
+})
+
+test('records whose highlight was merged are re-pointed at the survivor', async () => {
+  const root = await makeRoot()
+  // Two highlights over the same words, and a record on the later one.
+  await seed(root, 'session-a', {
+    highlights: [
+      { id: 'h-old', anchor: { ...anchor, text: 'passage' }, createdAt: 10 },
+      { id: 'h-new', anchor: { ...anchor, text: 'passage' }, createdAt: 20 },
+    ],
+    records: [
+      record('r1', { highlightId: 'h-new', selection: 'passage', createdAt: 30 }),
+    ],
+  })
+  const store = createStore({ root, now: () => 9000 })
+
+  const state = await store.load('session-a')
+
+  assert.deepEqual(state.highlights.map((entry) => entry.id), ['h-old'], 'the older highlight survived')
+  assert.equal(state.records.length, 1, 'the record was not duplicated')
+  assert.equal(state.records[0].highlightId, 'h-old', 'the record follows the surviving highlight')
+})
+
+test('a record whose passage no longer exists keeps its text but no highlight', async () => {
+  const root = await makeRoot()
+  await seed(root, 'session-a', {
+    highlights: [],
+    records: [record('r1', { highlightId: 'h-gone', selection: 'vanished passage', createdAt: 30 })],
+  })
+  const store = createStore({ root, now: () => 9000 })
+
+  const state = await store.load('session-a')
+
+  assert.equal(state.records.length, 1, 'the record is still readable')
+  assert.equal(state.records[0].highlightId, 'h-gone', 'it keeps the id it had, nothing better exists')
+  assert.equal(state.records[0].selection, 'vanished passage')
+})
+
+test('a record re-points to a highlight whose text differs by a character or two', async () => {
+  const root = await makeRoot()
+  // The surviving highlight covers "the selected passage"; the orphaned record
+  // was kept from "the selected passag" — the same passage, one character short.
+  await seed(root, 'session-a', {
+    highlights: [{ id: 'h-live', anchor: { ...anchor, text: 'the selected passage' }, createdAt: 10 }],
+    records: [record('r1', { highlightId: 'h-gone', selection: 'the selected passag', createdAt: 30 })],
+  })
+  const store = createStore({ root, now: () => 9000 })
+
+  const state = await store.load('session-a')
+
+  assert.equal(state.records[0].highlightId, 'h-live', 'the near-identical passage matched')
 })

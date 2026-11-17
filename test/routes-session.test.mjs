@@ -146,8 +146,13 @@ test('POST add stores a highlight and returns the latest list', async () => {
 test('POST remove deletes by id and returns the latest list', async () => {
   const { routes, storeRoot } = await setup()
   const store = createStore({ root: storeRoot })
+  // Two different passages: identical anchors are one highlight now.
   await store.addHighlight('session-a', { id: 'h1', anchor, createdAt: 10 })
-  await store.addHighlight('session-a', { id: 'h2', anchor, createdAt: 11 })
+  await store.addHighlight('session-a', {
+    id: 'h2',
+    anchor: { ...anchor, spans: [{ blockIndex: 0, start: 20, end: 27 }], text: 'another' },
+    createdAt: 11,
+  })
 
   const res = await call(routes.get(HIGHLIGHT_PATH), makeRequest({
     url: HIGHLIGHT_PATH,

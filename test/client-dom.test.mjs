@@ -336,7 +336,7 @@ test('openHighlight gives up when the span is empty', async () => {
 
 /* --- centring --- */
 
-test('centreInColumn corrects a line that is off centre', async () => {
+test('centreInColumn eases the column towards the line and settles on it', async () => {
   const html = `
     <div data-conversation-scroll>
       <div class="clipchat-layer"><div class="clipchat-layer__line" id="line"></div></div>
@@ -347,12 +347,49 @@ test('centreInColumn corrects a line that is off centre', async () => {
     Object.defineProperty(scroller, 'clientHeight', { value: 400, configurable: true })
     scroller.scrollTop = 0
     const line = env.document.getElementById('line')
+    // 20px tall, 300px down a 400px viewport: centring means moving it up by
+    // 300 - (400 - 20) / 2 = 110px.
     line.getBoundingClientRect = () => ({ top: 300, height: 20, width: 100, left: 0, bottom: 320, right: 100 })
     scroller.getBoundingClientRect = () => ({ top: 0, height: 400, width: 600, left: 0, bottom: 400, right: 600 })
 
-    t.centreInColumn([line])
+    assert.equal(t.centreDeltaOf(line, scroller), 110, 'the distance to centre is measured')
 
-    assert.ok(scroller.scrollTop > 0, 'the column scrolled to centre the line')
+    // Drive the animation frame by frame so the motion is deterministic.
+    const frames = []
+    let now = 0
+    globalThis.requestAnimationFrame = (callback) => {
+      frames.push(callback)
+      return frames.length
+    }
+    globalThis.performance = { now: () => now }
+
+    t.animateScroll(scroller, 110)
+    const samples = []
+    for (let frame = 0; frame < 40 && frames.length > 0; frame += 1) {
+      const next = frames.shift()
+      now += 16
+      next(now)
+      samples.push(scroller.scrollTop)
+    }
+
+    assert.ok(samples.length > 5, 'the move took several frames rather than one')
+    assert.ok(Math.max(...samples) > 110, 'it travelled past the target before settling')
+    assert.equal(scroller.scrollTop, 110, 'and came back to rest exactly on it')
+  })
+})
+
+test('animateScroll falls back to an instant move without animation frames', async () => {
+  await withDom('<div id="s"></div>', (t, env) => {
+    const scroller = env.document.getElementById('s')
+    scroller.scrollTop = 0
+    const original = globalThis.requestAnimationFrame
+    delete globalThis.requestAnimationFrame
+    try {
+      t.animateScroll(scroller, 50)
+      assert.equal(scroller.scrollTop, 50, 'the distance was applied directly')
+    } finally {
+      globalThis.requestAnimationFrame = original
+    }
   })
 })
 
@@ -599,6 +636,144 @@ test('dateTextOf survives a value the date engine rejects', async () => {
       assert.equal(t.dateTextOf(1_700_000_000_000), '—')
     } finally {
       globalThis.Date = original
+    }
+  })
+})
+
+/* --- overlap: the same passage selected twice --- */
+
+/** Two anchors on one node, differing only in the span they cover. */
+function spanAnchor(start, end, blockIndex = 0) {
+  return {
+    nodeKey: '1:assistant-step1:1',
+    sourceIndex: 0,
+    spans: [{ blockIndex, start, end }],
+    text: 'x'.repeat(Math.max(0, end - start)),
+  }
+}
+
+test('anchorsOverlap treats any shared character as the same passage', async () => {
+  await withDom('', (t) => {
+    assert.equal(t.anchorsOverlap(spanAnchor(0, 10), spanAnchor(0, 10)), true, 'identical spans overlap')
+    assert.equal(t.anchorsOverlap(spanAnchor(0, 10), spanAnchor(8, 20)), true, 'a partial overlap counts')
+    assert.equal(t.anchorsOverlap(spanAnchor(0, 10), spanAnchor(9, 20)), true, 'a one-character overlap counts')
+    assert.equal(t.anchorsOverlap(spanAnchor(0, 10), spanAnchor(10, 20)), false, 'touching but disjoint does not')
+    assert.equal(t.anchorsOverlap(spanAnchor(0, 10), spanAnchor(20, 30)), false, 'a gap does not')
+  })
+})
+
+test('anchorsOverlap needs the same node and the same block', async () => {
+  await withDom('', (t) => {
+    const left = spanAnchor(0, 10)
+    assert.equal(t.anchorsOverlap(left, { ...spanAnchor(0, 10), nodeKey: '2:assistant-step2:1' }), false,
+      'a different node is a different passage')
+    assert.equal(t.anchorsOverlap(left, spanAnchor(0, 10, 3)), false, 'a different block does not overlap')
+  })
+})
+
+test('anchorsOverlap tolerates a malformed anchor', async () => {
+  await withDom('', (t) => {
+    assert.equal(t.anchorsOverlap(null, spanAnchor(0, 10)), false)
+    assert.equal(t.anchorsOverlap(spanAnchor(0, 10), null), false)
+    assert.equal(t.anchorsOverlap({ nodeKey: 'n' }, { nodeKey: 'n' }), false, 'no spans means no overlap')
+    assert.equal(t.anchorsOverlap({ nodeKey: 'n', spans: 'x' }, { nodeKey: 'n', spans: [] }), false)
+  })
+})
+
+test('highlightIdFor finds a highlight whose span only partly matches', async () => {
+  await withDom('', (t) => {
+    const anchor = spanAnchor(0, 12)
+    const id = t.addHighlight(anchor, null)
+    assert.ok(id, 'the first highlight was stored')
+
+    // A second selection of the same words, ending two characters short.
+    const shorter = spanAnchor(0, 10)
+    assert.equal(t.highlightIdFor('1:assistant-step1:1', shorter.text, shorter), id,
+      'the overlap matched the existing highlight')
+    assert.equal(t.hasHighlight('1:assistant-step1:1', shorter.text, shorter), true)
+  })
+})
+
+test('highlightIdFor falls back to exact text when no anchor is given', async () => {
+  await withDom('', (t) => {
+    const anchor = spanAnchor(0, 12)
+    const id = t.addHighlight(anchor, null)
+    assert.equal(t.highlightIdFor('1:assistant-step1:1', anchor.text), id, 'exact text still matches')
+    assert.equal(t.highlightIdFor('1:assistant-step1:1', 'other text'), null)
+    assert.equal(t.highlightIdFor('1:assistant-step1:1', 'other text', null), null)
+  })
+})
+
+test('addHighlight refuses a second selection of the same passage', async () => {
+  await withDom('', (t) => {
+    assert.ok(t.addHighlight(spanAnchor(0, 12), null), 'the first one was added')
+    assert.equal(t.addHighlight(spanAnchor(0, 10), null), null,
+      'a shorter selection of the same words is not a new highlight')
+    assert.equal(t.addHighlight(spanAnchor(11, 20), null), null,
+      'a selection overlapping by one character is not new either')
+    assert.ok(t.addHighlight(spanAnchor(50, 60), null), 'a genuinely different passage is added')
+  })
+})
+
+test('centreInColumn does nothing when the line has no height', async () => {
+  await withDom('<div data-conversation-scroll><div class="clipchat-layer__line" id="line"></div></div>', (t, env) => {
+    const scroller = env.document.querySelector('[data-conversation-scroll]')
+    scroller.scrollTop = 0
+    const line = env.document.getElementById('line')
+    line.getBoundingClientRect = () => ({ top: 100, height: 0, width: 100, left: 0, bottom: 100, right: 100 })
+
+    assert.equal(t.centreDeltaOf(line, scroller), null, 'an unlaid-out line has no centre')
+    t.centreInColumn([line])
+    assert.equal(scroller.scrollTop, 0, 'nothing moved')
+  })
+})
+
+test('centreInColumn scrolls a laid-out line through the animation', async () => {
+  await withDom('<div data-conversation-scroll><div class="clipchat-layer__line" id="line"></div></div>', (t, env) => {
+    const scroller = env.document.querySelector('[data-conversation-scroll]')
+    Object.defineProperty(scroller, 'clientHeight', { value: 400, configurable: true })
+    scroller.scrollTop = 0
+    const line = env.document.getElementById('line')
+    line.getBoundingClientRect = () => ({ top: 300, height: 20, width: 100, left: 0, bottom: 320, right: 100 })
+    scroller.getBoundingClientRect = () => ({ top: 0, height: 400, width: 600, left: 0, bottom: 400, right: 600 })
+
+    // No animation frames in this harness: the move lands immediately, which is
+    // enough to prove centreInColumn reached the animation.
+    const original = globalThis.requestAnimationFrame
+    delete globalThis.requestAnimationFrame
+    try {
+      t.centreInColumn([line])
+      assert.equal(scroller.scrollTop, 110, 'the column moved by the measured distance')
+    } finally {
+      globalThis.requestAnimationFrame = original
+    }
+  })
+})
+
+test('holdCentred leaves the column alone while an eased move is in flight', async () => {
+  await withDom('<div data-conversation-scroll><div class="clipchat-layer__line" id="line"></div></div>', (t, env) => {
+    const scroller = env.document.querySelector('[data-conversation-scroll]')
+    Object.defineProperty(scroller, 'clientHeight', { value: 400, configurable: true })
+    scroller.scrollTop = 0
+    const line = env.document.getElementById('line')
+    line.getBoundingClientRect = () => ({ top: 300, height: 20, width: 100, left: 0, bottom: 320, right: 100 })
+    scroller.getBoundingClientRect = () => ({ top: 0, height: 400, width: 600, left: 0, bottom: 400, right: 600 })
+
+    // Start an eased move, then immediately ask the hold loop to centre. The
+    // hold must wait: a second writer mid-animation is what made the jump look
+    // like it stuttered.
+    const frames = []
+    const realRaf = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = (callback) => { frames.push(callback); return frames.length }
+    try {
+      t.animateScroll(scroller, 110)
+      assert.ok(frames.length > 0, 'the animation was scheduled')
+
+      const before = scroller.scrollTop
+      t.holdCentred(() => [line], Date.now() + 200)
+      assert.equal(scroller.scrollTop, before, 'the hold did not move the column')
+    } finally {
+      globalThis.requestAnimationFrame = realRaf
     }
   })
 })

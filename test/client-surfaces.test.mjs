@@ -1021,3 +1021,36 @@ test('re-marking an answer as a record after cancelling it works', async () => {
     assert.equal(plugin.__test.recordList()[0].turns[0].question, 'my question')
   })
 })
+
+test('selecting the same words twice keeps one highlight and one record', async () => {
+  // The bug the reader reported: asking twice about what looked like one
+  // passage left two underlines and two records, because the second selection
+  // ended two characters earlier and was treated as a different passage.
+  globalThis.fetch = answerFetch()
+  await withCard(async ({ container, plugin }) => {
+    await askQuestion(container, 'my question')
+    await flush(40)
+    assert.equal(plugin.__test.recordCount(), 1, 'the first ask recorded once')
+
+    const id = plugin.__test.highlightIdFor(NODE_KEY, 'selected passage', ANCHOR)
+    assert.ok(id, 'the passage has a highlight')
+
+    // The same words, one character shorter.
+    const shorter = {
+      nodeKey: NODE_KEY,
+      sourceIndex: 0,
+      spans: [{ blockIndex: 0, start: 0, end: 15 }],
+      text: 'selected passag',
+    }
+    assert.equal(
+      plugin.__test.highlightIdFor(NODE_KEY, shorter.text, shorter),
+      id,
+      'a shorter selection of the same words resolves to the same highlight',
+    )
+    assert.equal(
+      plugin.__test.addHighlight(shorter, null),
+      null,
+      'and asking about it does not create a second highlight',
+    )
+  })
+})

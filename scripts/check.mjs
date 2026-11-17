@@ -12,6 +12,7 @@
  * reason they cannot be exercised; the check fails if that list and the report
  * disagree, so a new gap cannot hide behind a stale exemption.
  */
+import { readFileSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,10 +32,15 @@ const SOURCE_FILES = ['index.js', 'client.js']
  */
 const SHIPPED = ['client.js', 'index.js', 'context.js', 'digest.js', 'http.js', 'model.js', 'models.js', 'search.js', 'store.js']
 
-const ALLOWED_UNCOVERED = {
+export const ALLOWED_UNCOVERED = {
   'lib/store.js': {
-    lines: ['483-485', '620-622'],
-    reason: 'a write and a read that fail for reasons a portable test cannot stage',
+    // Located by the code it guards, so edits above it do not break the entry.
+    contains: 'await rm(tmp, { force: true }).catch(() => {})',
+    span: 3,
+    reason:
+      'the cleanup after a failed rename: the test exercises it and asserts the '
+      + 'temp file is gone, but V8 does not attribute lines inside a catch block '
+      + 'that unwinds through an awaited rejection',
   },
 }
 
@@ -57,39 +63,47 @@ async function collect(dir) {
   return out
 }
 
-const files = [...SOURCE_FILES]
-for (const dir of SOURCE_DIRS) files.push(...await collect(dir))
+/** Run the whole check: syntax, tests, then the coverage gate. */
+async function main() {
+  const files = [...SOURCE_FILES]
+  for (const dir of SOURCE_DIRS) files.push(...await collect(dir))
 
-let failed = false
-for (const file of files) {
-  const result = spawnSync(process.execPath, ['--check', file], { cwd: ROOT, stdio: 'inherit' })
-  if (result.status !== 0) failed = true
+  let failed = false
+  for (const file of files) {
+    const result = spawnSync(process.execPath, ['--check', file], { cwd: ROOT, stdio: 'inherit' })
+    if (result.status !== 0) failed = true
+  }
+  if (failed) process.exit(1)
+
+  const tests = files.filter((file) => file.startsWith('test/') && file.endsWith('.test.mjs'))
+  const result = spawnSync(
+    process.execPath,
+    ['--experimental-test-coverage', '--test', ...tests],
+    { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' },
+  )
+  process.stdout.write(result.stdout ?? '')
+  if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1)
+
+  const problems = auditCoverage(result.stdout ?? '')
+  if (problems.length > 0) {
+    console.error('\nCoverage check failed:')
+    for (const problem of problems) console.error(`  - ${problem}`)
+    process.exit(1)
+  }
+  console.log('\nCoverage check passed: every shipped line is executed by a test.')
 }
-if (failed) process.exit(1)
 
-const tests = files.filter((file) => file.startsWith('test/') && file.endsWith('.test.mjs'))
-const result = spawnSync(
-  process.execPath,
-  ['--experimental-test-coverage', '--test', ...tests],
-  { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8' },
-)
-process.stdout.write(result.stdout ?? '')
-if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1)
-
-const problems = auditCoverage(result.stdout ?? '')
-if (problems.length > 0) {
-  console.error('\nCoverage check failed:')
-  for (const problem of problems) console.error(`  - ${problem}`)
-  process.exit(1)
+// Importing this file must not run the check; the audit is exercised on its own.
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+  await main()
 }
-console.log('\nCoverage check passed: every shipped line is executed by a test.')
 
 /**
  * Compare the coverage report against the required threshold.
  * @param {string} report - the runner's stdout, including the coverage table.
  * @returns {string[]} one message per problem; empty when the check passes.
  */
-function auditCoverage(report) {
+export function auditCoverage(report) {
   const problems = []
   const rows = parseCoverageTable(report)
   if (rows.length === 0) {
@@ -98,30 +112,77 @@ function auditCoverage(report) {
   }
 
   for (const row of rows) {
-    const allowed = ALLOWED_UNCOVERED[row.file]
-    const uncovered = row.uncovered.length > 0 ? row.uncovered : []
-    const exempted = new Set(allowed?.lines ?? [])
-
-    if (row.line < REQUIRED_LINE_COVERAGE && uncovered.length === 0) {
-      problems.push(`${row.file}: ${row.line}% line coverage but no uncovered lines listed`)
+    const allowed = exemptionFor(row.path)
+    const uncovered = row.uncovered
+    if (uncovered.length === 0) {
+      if (allowed !== undefined) {
+        problems.push(`${row.file}: every exempted line is now covered, drop the exemption`)
+      }
       continue
     }
-    if (uncovered.length === 0) continue
 
+    const exempted = resolveExemption(row.path, allowed)
     const unexpected = uncovered.filter((range) => !exempted.has(range))
     if (unexpected.length > 0) {
       problems.push(`${row.file}: uncovered lines ${unexpected.join(' ')} (${row.line}%)`)
     }
-    for (const range of exempted) {
-      if (!uncovered.includes(range)) {
-        problems.push(`${row.file}: exemption ${range} is stale, that line is now covered`)
+    if (allowed !== undefined) {
+      if (allowed.reason.trim().length === 0) problems.push(`${row.file}: exemption has no reason`)
+      if (exempted.size === 0) {
+        problems.push(`${row.file}: exemption "${allowed.contains}" no longer matches any line, drop it`)
+      } else if (![...exempted].some((range) => uncovered.includes(range))) {
+        problems.push(`${row.file}: exemption "${allowed.contains}" is now covered, drop it`)
       }
-    }
-    if (allowed !== undefined && allowed.reason.length === 0) {
-      problems.push(`${row.file}: exemption has no reason`)
     }
   }
   return problems
+}
+
+/**
+ * The exemption registered for a coverage row.
+ *
+ * The runner prints `lib/store.js` when it groups a directory and `client.js`
+ * bare for a top-level file, so a row is matched against the exemption key both
+ * as printed and with a `lib/` prefix.
+ *
+ * @param {string} file - path as printed.
+ * @returns {{ contains: string, span: number, reason: string } | undefined} the exemption.
+ */
+function exemptionFor(file) {
+  return ALLOWED_UNCOVERED[file] ?? ALLOWED_UNCOVERED[`lib/${file}`]
+}
+
+/**
+ * Line ranges an exemption covers in this run.
+ *
+ * The entry names a line of code rather than a line number, because the numbers
+ * drift with every edit above them and a stale number would silently stop
+ * exempting anything.
+ *
+ * @param {string} file - repo-relative file.
+ * @param {{ contains: string, span: number } | undefined} allowed - the exemption.
+ * @returns {Set<string>} `start-end` ranges.
+ */
+export function resolveExemption(file, allowed) {
+  const ranges = new Set()
+  if (allowed === undefined) return ranges
+  let source = null
+  for (const candidate of [file, `lib/${file}`]) {
+    try {
+      source = readFileSync(join(ROOT, candidate), 'utf8')
+      break
+    } catch {
+      /* Try the next spelling. */
+    }
+  }
+  if (source === null) return ranges
+  const lines = source.split('\n')
+  const index = lines.findIndex((line) => line.includes(allowed.contains))
+  if (index < 0) return ranges
+  const start = index + 1
+  const end = Math.min(lines.length, index + allowed.span)
+  ranges.add(start === end ? `${start}` : `${start}-${end}`)
+  return ranges
 }
 
 /**
@@ -152,7 +213,9 @@ function parseCoverageTable(report) {
     // happens to call is not a coverage gap in the product.
     if (!SHIPPED.some((shipped) => file === shipped || file.endsWith(`/${shipped}`))) continue
     rows.push({
+      // `file` is the label used in messages; `path` is what exemptions key on.
       file,
+      path: file,
       line: Number.parseFloat(percent),
       uncovered: uncovered.trim().length === 0 ? [] : uncovered.trim().split(/\s+/u),
     })

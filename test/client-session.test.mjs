@@ -393,3 +393,51 @@ test('scheduleSessionCheck debounces repeated calls', async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test('a session reload keeps highlights visible until the new state arrives', async () => {
+  // The reload clears memory first so a stale session never shows; the overlay
+  // must not be wiped to an empty frame in between.
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+  const anchor = {
+    nodeKey: '1:assistant-step1:1',
+    sourceIndex: 0,
+    spans: [{ blockIndex: 0, start: 0, end: 7 }],
+    text: 'passage',
+  }
+  // Load once so the module knows which session it is on; a later reload of the
+  // same session must not clear what is already on screen.
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ highlights: [], records: [] }) })
+  await test_.loadSession('session-a')
+  test_.addHighlight(anchor, null)
+  assert.equal(test_.highlightIdOf('1:assistant-step1:1', 'passage') !== null, true)
+
+  let release
+  globalThis.fetch = () => new Promise((resolve) => { release = resolve })
+  const loading = test_.loadSession('session-a')
+
+  // Mid-flight: the highlight is still in memory, so the underline stays.
+  assert.equal(test_.hasHighlight('1:assistant-step1:1', 'passage'), true,
+    'the highlight is not dropped before the new state arrives')
+
+  release({ ok: true, json: async () => ({ highlights: [{ id: 'h1', anchor, createdAt: 1 }], records: [] }) })
+  await loading
+  assert.equal(test_.hasHighlight('1:assistant-step1:1', 'passage'), true, 'and it survives the reload')
+})
+
+test('loading an empty session id clears what is on screen', async () => {
+  const test_ = await loadPlugin(makeDocument({ sessionId: 'session-a' }))
+  const anchor = {
+    nodeKey: '1:assistant-step1:1',
+    sourceIndex: 0,
+    spans: [{ blockIndex: 0, start: 0, end: 7 }],
+    text: 'passage',
+  }
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ highlights: [], records: [] }) })
+  await test_.loadSession('session-a')
+  test_.addHighlight(anchor, null)
+  assert.equal(test_.hasHighlight('1:assistant-step1:1', 'passage'), true)
+
+  // No session means nothing to show: the overlay must not linger.
+  await test_.loadSession('')
+  assert.equal(test_.hasHighlight('1:assistant-step1:1', 'passage'), false)
+})
