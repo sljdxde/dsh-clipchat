@@ -205,3 +205,60 @@ test('a highlight captures the model chosen when it was created', () => {
   assert.equal(test_.addHighlight(anchor, null), null, 'the same passage is not duplicated')
   assert.equal(test_.storedModelOf('missing', 'none'), null)
 })
+
+/** A single turn with a user message and five assistant steps. */
+function makeTurnSnapshot({ running = [] } = {}) {
+  const keys = ['9:user1:0', '9:assistant-step1:1', '9:assistant-step2:2', '9:assistant-step3:3', '9:assistant-step4:4', '9:assistant-step5:5']
+  const nodes = new Map()
+  nodes.set('9:user1:0', {
+    kind: 'user',
+    visibility: 'visible',
+    content: [{ type: 'text', text: 'design question' }],
+  })
+  for (let step = 1; step <= 5; step += 1) {
+    nodes.set(`9:assistant-step${step}:${step}`, {
+      kind: 'assistant-step',
+      visibility: 'visible',
+      location: { kind: 'step', turn: { turn: 9 } },
+      data: {
+        status: running.includes(step) ? 'running' : 'settled',
+        turn: 9,
+        blocks: [{ kind: 'text', text: `step ${step}` }],
+      },
+    })
+  }
+  return {
+    nodes: { get: (key) => nodes.get(key) },
+    timeline: { turnOrder: [9], turns: new Map([[9, { turn: 9, status: 'closed' }]]) },
+    locations: { getTurn: () => keys },
+  }
+}
+
+test('neighbour context keeps the turn user message and two steps on each side', () => {
+  const context = test_.neighborContextOf(makeTurnSnapshot(), '9:assistant-step3:3', 2)
+  assert.deepEqual(context, {
+    user: 'design question',
+    before: 'step 1\n\nstep 2',
+    after: 'step 4\n\nstep 5',
+  })
+})
+
+test('neighbour context stops at the edges and skips running steps', () => {
+  assert.deepEqual(test_.neighborContextOf(makeTurnSnapshot(), '9:assistant-step1:1', 2), {
+    user: 'design question',
+    before: '',
+    after: 'step 2\n\nstep 3',
+  })
+  assert.deepEqual(test_.neighborContextOf(makeTurnSnapshot({ running: [2] }), '9:assistant-step3:3', 2), {
+    user: 'design question',
+    before: 'step 1',
+    after: 'step 4\n\nstep 5',
+  })
+})
+
+test('neighbour context is empty when the chat or node is missing', () => {
+  const empty = { user: '', before: '', after: '' }
+  assert.deepEqual(test_.neighborContextOf(undefined, 'k'), empty)
+  assert.deepEqual(test_.neighborContextOf(makeTurnSnapshot(), 'missing', 2), empty)
+  assert.deepEqual(test_.neighborContextOf({ nodes: { get: () => undefined }, locations: { getTurn: () => [] } }, 'k'), empty)
+})

@@ -203,3 +203,51 @@ test('questions hit the request with a leading context message even without rece
   assert.equal(result.messages.length, 2)
   assert.equal(result.messages.at(-1).content[0].text, 'why?')
 })
+
+test('neighbouring steps and the turn user message sit around <message>', () => {
+  const result = buildContext(input({
+    neighbors: { user: 'the question that produced this turn', before: 'step before', after: 'step after' },
+    turn: 9,
+  }))
+  const text = contextOf(result)
+
+  const order = ['<turn-user>', '<before>', '<message', '<after>', '<selection>'].map((tag) => text.indexOf(tag))
+  assert.ok(order.every((at) => at >= 0), 'every neighbour block is present')
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'blocks keep the settled order')
+  assert.match(text, /<turn-user>\nthe question that produced this turn\n<\/turn-user>/)
+  assert.match(text, /<before>\nstep before\n<\/before>/)
+  assert.match(text, /<after>\nstep after\n<\/after>/)
+})
+
+test('neighbours are clipped to their budget', () => {
+  const result = buildContext(input({
+    neighbors: { user: 'u'.repeat(5000), before: 'b'.repeat(5000), after: 'a'.repeat(5000) },
+  }))
+  const text = contextOf(result)
+
+  assert.equal(text.match(/<turn-user>\n(u+)\n<\/turn-user>/)[1].length, LIMITS.turnUserChars)
+  assert.equal(text.match(/<before>\n(b+)\n<\/before>/)[1].length, LIMITS.neighborChars)
+  assert.equal(text.match(/<after>\n(a+)\n<\/after>/)[1].length, LIMITS.neighborChars)
+})
+
+test('neighbours are dropped before the message when the budget is exceeded', () => {
+  const result = buildContext(input({
+    selection: 'SELECTED',
+    message: 'm'.repeat(3000),
+    neighbors: { user: 'u'.repeat(2000), before: 'b'.repeat(2000), after: 'a'.repeat(2000) },
+    question: 'why?',
+  }))
+  const text = contextOf(result)
+
+  assert.ok(text.includes('SELECTED'), 'the selection is never trimmed')
+  assert.ok(text.length + SYSTEM_PROMPT.length + 'why?'.length <= LIMITS.totalChars + 1)
+})
+
+test('missing or malformed neighbours are ignored', () => {
+  for (const neighbors of [undefined, null, {}, { user: 5, before: {}, after: [] }]) {
+    const text = contextOf(buildContext(input({ neighbors })))
+    assert.ok(!text.includes('<turn-user>'))
+    assert.ok(!text.includes('<before>'))
+    assert.ok(!text.includes('<after>'))
+  }
+})

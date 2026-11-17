@@ -13,6 +13,7 @@ window.__ModuleLoader__.load({
     const FOLLOW_MODEL = 'follow'
     const HISTORY_LIMIT = 12
     const RECENT_LIMIT = 3
+    const NEIGHBOR_LIMIT = 2
     const SEARCH_LIMIT = 20
 
     /* Constants and locale dictionaries. */
@@ -170,6 +171,10 @@ window.__ModuleLoader__.load({
 .clipchat-card__q{font-size:12.5px;font-weight:600;line-height:1.5;margin-bottom:6px;white-space:pre-wrap}
 .clipchat-card__a{white-space:pre-wrap;line-height:1.7;font-size:13.5px;word-break:break-word}
 .clipchat-card__a code{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12.5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12));border-radius:4px;padding:1px 4px}
+.clipchat-card__turn-actions{display:flex;gap:6px;margin-top:6px;justify-content:flex-end}
+.clipchat-card__copy{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11px;line-height:1.4;cursor:pointer;border-radius:999px;padding:1px 8px;transition:background .12s ease,color .12s ease}
+.clipchat-card__copy:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
+.clipchat-card:focus{outline:none}
 .clipchat-card__cursor{display:inline-block;margin-left:1px;animation:clipchat-blink 1s step-end infinite}
 @keyframes clipchat-blink{50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.clipchat-card__cursor{animation:none}}
@@ -890,6 +895,53 @@ window.__ModuleLoader__.load({
         .join('\n\n')
     }
 
+    /**
+     * Context around the selected step, for prompts that need the thread of the
+     * reply: the turn's user message and up to `radius` settled steps on each
+     * side of the selected one.
+     * @param {{ nodes: Map<string, object>, locations: { getTurn: Function } } | undefined | null} chat - snapshot slices.
+     * @param {string} nodeKey - the selected assistant step.
+     * @param {number} [radius] - steps kept on each side.
+     * @returns {{ user: string, before: string, after: string }} neighbour text.
+     */
+    function neighborContextOf(chat, nodeKey, radius = NEIGHBOR_LIMIT) {
+      const empty = { user: '', before: '', after: '' }
+      if (chat === undefined || chat === null) return empty
+      if (typeof chat.nodes?.get !== 'function' || typeof chat.locations?.getTurn !== 'function') return empty
+      const target = chat.nodes.get(nodeKey)
+      if (target === undefined || target === null) return empty
+      const turn = nodeTurn(target)
+      const keys = typeof turn === 'number' ? chat.locations.getTurn(turn) : undefined
+      if (!Array.isArray(keys)) return empty
+
+      let user = ''
+      const steps = []
+      for (const key of keys) {
+        const node = chat.nodes.get(key)
+        if (node === undefined || node === null || node.visibility === 'hidden') continue
+        if (node.kind === 'user' || node.kind === 'steering') {
+          const text = userTextOf(node)
+          if (text.length > 0) user = user.length > 0 ? `${user}\n\n${text}` : text
+          continue
+        }
+        if (node.kind === 'assistant-step' && node.data?.status !== 'running') {
+          steps.push({ key, text: assistantTextOf(node) })
+        }
+      }
+
+      const index = steps.findIndex((step) => step.key === nodeKey)
+      if (index < 0) return { user, before: '', after: '' }
+      const join = (entries) => entries
+        .map((entry) => entry.text)
+        .filter((text) => text.length > 0)
+        .join('\n\n')
+      return {
+        user,
+        before: join(steps.slice(Math.max(0, index - radius), index)),
+        after: join(steps.slice(index + 1, index + 1 + radius)),
+      }
+    }
+
     /** Owning turn of a chat node, from either its location or its assistant data. */
     function nodeTurn(node) {
       const fromLocation = node?.location?.turn?.turn
@@ -1255,6 +1307,7 @@ window.__ModuleLoader__.load({
       const { selection, nodeKey, anchor, dismiss, translate, sessionId, useChat, inputActions, initialHighlightId } = props
       const textareaRef = React.useRef(null)
       const threadRef = React.useRef(null)
+      const cardRef = React.useRef(null)
       const controllerRef = React.useRef(null)
       const requestIdRef = React.useRef(0)
       const aliveRef = React.useRef(true)
@@ -1280,6 +1333,7 @@ window.__ModuleLoader__.load({
         : { question: loadedRecord.question, answer: loadedRecord.answer })
       const [recordsOpen, setRecordsOpen] = React.useState(false)
       const [insertState, setInsertState] = React.useState('idle')
+      const [copiedTurn, setCopiedTurn] = React.useState(null)
       const [, bumpRecords] = React.useState(0)
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
@@ -1316,6 +1370,13 @@ window.__ModuleLoader__.load({
         controllerRef.current?.abort()
         controllerRef.current = null
       }, [])
+
+      // Clear the per-turn “copied” label after a moment.
+      React.useEffect(() => {
+        if (copiedTurn === null) return undefined
+        const timer = setTimeout(() => setCopiedTurn(null), 1500)
+        return () => clearTimeout(timer)
+      }, [copiedTurn])
 
       // Keep the newest turn in view while the answer grows.
       React.useEffect(() => {
@@ -1453,6 +1514,7 @@ window.__ModuleLoader__.load({
           return
         }
         const recent = recentTurnsOf(chat, nodeKey, RECENT_LIMIT)
+        const neighbors = neighborContextOf(chat, nodeKey)
         const turn = nodeTurn(node)
 
         // Asking is the commit signal: the passage is highlighted on first ask.
@@ -1478,6 +1540,7 @@ window.__ModuleLoader__.load({
           message,
           turn,
           recent,
+          neighbors,
           history,
           question,
         }
@@ -1618,6 +1681,20 @@ window.__ModuleLoader__.load({
         return part.text
       })
 
+      /** Copy one turn's answer; a denied clipboard must not break the card. */
+      const copyTurn = async (turn, index) => {
+        if (turn.answer.length === 0) return
+        try {
+          if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') return
+          // Copy what the reader sees: `**bold**` and `` `code` `` lose their markers.
+          const plain = inlineParts(turn.answer).map((part) => part.text).join('')
+          await navigator.clipboard.writeText(plain)
+          setCopiedTurn(index)
+        } catch {
+          /* Ignore: the answer stays selectable even when the clipboard is denied. */
+        }
+      }
+
       const turnView = (turn, index) => h('div', {
         key: `${index}:${turn.question.slice(0, 12)}`,
         className: 'clipchat-card__turn',
@@ -1630,6 +1707,15 @@ window.__ModuleLoader__.load({
           turn.streaming ? h('span', { className: 'clipchat-card__cursor' }, '▍') : null),
         turn.error.length > 0
           ? h('div', { className: 'clipchat-card__error', role: 'alert' }, turn.error)
+          : null,
+        turn.answer.length > 0 && turn.streaming !== true
+          ? h('div', { className: 'clipchat-card__turn-actions' },
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__copy',
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: () => void copyTurn(turn, index),
+            }, copiedTurn === index ? translate('copied') : translate('copy')))
           : null,
       )
 
@@ -1666,7 +1752,18 @@ window.__ModuleLoader__.load({
             }, expanded ? translate('collapseAnswer') : translate('expandAnswer'))))
       }
 
-      return h('div', { className: 'clipchat-card' },
+      return h('div', {
+        ref: cardRef,
+        className: 'clipchat-card',
+        tabIndex: -1,
+        onMouseDown: (event) => {
+          const target = event.target
+          // A control keeps its own focus; anything else focuses the card so the
+          // host surface (which dismisses when focus leaves it) stays open.
+          if (target instanceof Element && target.closest('textarea, input, select, button') !== null) return
+          cardRef.current?.focus?.()
+        },
+      },
         h('div', { className: 'clipchat-card__bar' },
           h('span', { className: 'clipchat-card__mark' }, '✦'),
           h('span', {
@@ -1942,6 +2039,7 @@ window.__ModuleLoader__.load({
         userTextOf,
         nodeTurn,
         recentTurnsOf,
+        neighborContextOf,
         createSseDecoder,
         errorMessageOf,
         segmentsForSpan,

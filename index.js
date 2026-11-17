@@ -298,6 +298,7 @@ export function apply(ctx, options = {}) {
         message: body?.message,
         turn: body?.turn,
         recent: body?.recent,
+        neighbors: body?.neighbors,
         history: body?.history,
         question: body?.question,
         model,
