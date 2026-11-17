@@ -856,6 +856,27 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Centre a highlight line in the conversation column.
+     *
+     * The host centres the whole turn, which can leave a short passage near an
+     * edge; this is a small corrective scroll on the column only, and it runs
+     * after the host's jump settles so it never fights the virtualizer.
+     *
+     * @param {Element[]} lines - underline elements of the target highlight.
+     * @returns {void}
+     */
+    function centreInColumn(lines) {
+      if (typeof document === 'undefined' || !Array.isArray(lines) || lines.length === 0) return
+      const scroller = document.querySelector('[data-conversation-scroll]')
+      if (scroller === null || scroller === undefined) return
+      const box = lines[0].getBoundingClientRect()
+      const view = scroller.getBoundingClientRect()
+      if (box.height <= 0) return
+      const delta = box.top - view.top - (scroller.clientHeight - box.height) / 2
+      if (Number.isFinite(delta) && Math.abs(delta) > 4) scroller.scrollTop += delta
+    }
+
+    /**
      * Bring one stored highlight into view and flash its underline.
      *
      * The host scrolls asynchronously (and mounts the turn on demand), so the
@@ -896,6 +917,8 @@ window.__ModuleLoader__.load({
 
       const target = Number.isInteger(turn) ? turn : turnOfNodeKey(anchor.nodeKey)
       const used = navigateToTurn(target)
+      // Nudge the passage out from under the card, if it landed there.
+      setTimeout(() => centreInColumn(linesOf()), 200)
       if (used === null) {
         const node = nodesFor(anchor.nodeKey)[0]
         if (node === undefined || typeof node.scrollIntoView !== 'function') return false
@@ -1863,9 +1886,10 @@ window.__ModuleLoader__.load({
         setLocateFailed(false)
         const anchor = highlights.get(highlightId)?.anchor
         const node = anchor === undefined ? undefined : nodes?.get?.(anchor.nodeKey)
+        // Close first: the card is anchored to the selection, so leaving it open
+        // would re-anchor it onto the passage we are about to reveal and hide it.
+        dismiss()
         revealHighlight(highlightId, nodeTurn(node) ?? null)
-        const highlight = highlights.get(highlightId)
-        if (highlight !== undefined) openHighlight(highlight)
       }
 
       const recordRow = (entry) => {
