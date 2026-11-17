@@ -1727,7 +1727,10 @@ window.__ModuleLoader__.load({
       const [loadedRecord] = React.useState(() => initialHighlightId === null || initialHighlightId === undefined
         ? null
         : recordForHighlight(initialHighlightId, selection))
-      const [draft, setDraft] = React.useState(() => loadedRecord?.question ?? '')
+      // The composer always starts empty: a recalled record is already shown as
+      // a turn by `threadTurns`, so seeding the draft repeated the old question
+      // in the input box as if it were still unsent.
+      const [draft, setDraft] = React.useState('')
       const [answer, setAnswer] = React.useState('')
       const [tokens, setTokens] = React.useState(null)
       const [error, setError] = React.useState('')

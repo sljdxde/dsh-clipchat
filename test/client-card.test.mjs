@@ -43,7 +43,7 @@ function useChat(selector) {
   })
 }
 
-function renderCard(plugin, { selection = 'selected passage', anchor = null } = {}) {
+function renderCard(plugin, { selection = 'selected passage', anchor = null, initialHighlightId = undefined } = {}) {
   return plugin.__test.ClipCard({
     selection,
     nodeKey,
@@ -53,7 +53,7 @@ function renderCard(plugin, { selection = 'selected passage', anchor = null } = 
     sessionId: 'session-test',
     useChat,
     inputActions: undefined,
-    initialHighlightId: undefined,
+    initialHighlightId,
   })
 }
 
@@ -193,6 +193,51 @@ test('sending a question empties the composer for the next one', async () => {
     preset.args[1].onClick()
 
     assert.equal(draft.calls[draft.calls.length - 1], '', 'sending must clear the draft')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+/** Every rendered string leaf, depth-first. */
+function textsOf(node, out = []) {
+  if (Array.isArray(node)) {
+    for (const child of node) textsOf(child, out)
+    return out
+  }
+  if (typeof node === 'string') {
+    out.push(node)
+    return out
+  }
+  if (node === null || typeof node !== 'object' || !Array.isArray(node.args)) return out
+  textsOf(node.args.slice(2), out)
+  return out
+}
+
+test('reopening a highlight keeps its earlier question out of the composer', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeInteractiveReact())
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({ error: 'test' }) })
+  try {
+    plugin.__test.addRecord({
+      id: 'r-reopen',
+      selection: 'selected passage',
+      question: '这个参数，到底是做什么用的',
+      answer: '它决定下游是否把当前可行当最终结论。',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      createdAt: 1000,
+    })
+
+    const tree = renderCard(plugin, { initialHighlightId: 'h-reopen' })
+    const textarea = elementsOf(tree, 'textarea')
+      .find((node) => node.args[1]?.className === 'clipchat-card__ta')
+    assert.ok(textarea, 'the composer renders a textarea')
+    assert.equal(textarea.args[1].value, '', 'a recalled record must not refill the composer')
+
+    // The recalled question still shows, as a thread turn rather than as input.
+    assert.ok(textsOf(tree).includes('这个参数，到底是做什么用的'),
+      'the earlier question is still visible in the thread')
   } finally {
     globalThis.fetch = originalFetch
   }
