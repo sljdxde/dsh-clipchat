@@ -233,7 +233,7 @@ test('streams meta, delta, usage and done in order for one ask', async () => {
   assert.equal(res.ended, true)
 })
 
-test('sends the system prompt, the assembled context and the routed token budget', async () => {
+test('sends the system prompt and the assembled context without a fixed output budget', async () => {
   const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
   const { ctx, routes } = makeContext({
     connection: { requestRejection: () => undefined },
@@ -248,7 +248,10 @@ test('sends the system prompt, the assembled context and the routed token budget
   assert.equal(options.provider, 'deepseek')
   assert.equal(options.model, 'chat')
   assert.equal(options.reasoningEffort, 'high')
-  assert.equal(options.maxTokens, 2048)
+  // A hard cap is shared with a reasoning model's thinking and can be spent
+  // entirely on it, leaving the answer empty; the provider's own budget is the
+  // only number that fits the model it belongs to.
+  assert.equal(options.maxTokens, undefined, 'never caps the output budget')
   assert.equal(typeof options.system, 'string')
   assert.ok(options.system.length > 0)
   assert.equal(options.tools, undefined, 'never declares tools')
@@ -259,6 +262,46 @@ test('sends the system prompt, the assembled context and the routed token budget
   assert.ok(context.indexOf('<selection>') < context.indexOf('<recent>'))
   assert.match(context, /the selected passage/)
   assert.match(context, /earlier question/)
+})
+
+test('a stream that finishes with no text reports an empty answer, not a generic failure', async () => {
+  // What a reasoning model that spent its whole output budget thinking looks
+  // like: usage reported, a normal finish, and no text delta at all.
+  const llm = scriptedLlm([
+    { type: 'usage', usage: { inputTokens: 594, outputTokens: 2048 } },
+    { type: 'finish', reason: { kind: 'length' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'deepseek-reasoner' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+  const frames = framesOf(res)
+
+  assert.deepEqual(frames.map((frame) => frame.type), ['meta', 'usage', 'error'])
+  assert.equal(frames[2].code, 'empty-answer')
+  assert.match(frames[2].message, /没有返回正文/)
+})
+
+test('a stream that finishes with text is not reported as empty', async () => {
+  const llm = scriptedLlm([
+    { type: 'text-delta', index: 0, text: 'hi' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+  const frames = framesOf(res)
+
+  assert.deepEqual(frames.map((frame) => frame.type), ['meta', 'delta', 'done'])
 })
 
 test('assistant history is rebuilt as a model message with the routed source', async () => {
@@ -857,7 +900,10 @@ test('a client that disconnects mid-stream aborts the model call', async () => {
 })
 
 test('an ask still proceeds when the retention touch fails', async () => {
-  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const llm = scriptedLlm([
+    { type: 'text-delta', index: 0, text: 'an answer' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
   const { ctx, routes } = makeContext({
     connection: { requestRejection: () => undefined },
     sessions: { get: () => sessionWith({ provider: 'deepseek', model: 'chat' }) },

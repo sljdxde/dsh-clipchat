@@ -42,7 +42,6 @@ const RECORD_PATH = `${PREFIX}/record`
 const MODELS_PATH = `${PREFIX}/models`
 const SEARCH_PATH = `${PREFIX}/search`
 const CONTEXT_PATH = `${PREFIX}/context`
-const ANSWER_MAX_TOKENS = 2048
 /** How long the context route waits for a cold session log before degrading. */
 const CONTEXT_READ_TIMEOUT_MS = 1200
 /**
@@ -348,19 +347,25 @@ export function apply(ctx, options = {}) {
 
     const startedAt = performance.now()
     let firstTokenMs = null
+    let answeredChars = 0
     let settled = false
     try {
+      // No `maxTokens`: a fixed output budget is shared with a reasoning model's
+      // thinking, so it can be spent entirely on reasoning and leave the answer
+      // empty, and it cuts long answers mid-sentence. The provider's own
+      // per-model budget is the only number that fits the model it belongs to;
+      // the system prompt, not a token cap, is what keeps answers short.
       const stream = llm.stream({
         provider: model.provider,
         model: model.model,
         ...model.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort },
         system: built.system,
-        maxTokens: ANSWER_MAX_TOKENS,
         messages: built.messages,
         signal: controller.signal,
       })
       for await (const chunk of stream) {
         if (chunk?.type === 'text-delta') {
+          if (typeof chunk.text === 'string') answeredChars += chunk.text.length
           if (firstTokenMs === null) firstTokenMs = Math.max(0, Math.round(performance.now() - startedAt))
           writeFrame(res, { type: 'delta', text: chunk.text }, () => closed)
         } else if (chunk?.type === 'usage') {
@@ -378,6 +383,15 @@ export function apply(ctx, options = {}) {
               type: 'error',
               code: reason.failure?.code,
               message: reason.failure?.message ?? reason.kind,
+            }, () => closed)
+          } else if (answeredChars === 0) {
+            // A normal finish with no text is not a network failure: the model
+            // spent its output budget on reasoning, or returned nothing at all.
+            // Saying so is what lets the user retry or switch models knowingly.
+            writeFrame(res, {
+              type: 'error',
+              code: 'empty-answer',
+              message: '模型这次没有返回正文，请重试或换一个模型',
             }, () => closed)
           } else {
             writeFrame(res, { type: 'done', reason: reason.kind, firstTokenMs }, () => closed)

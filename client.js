@@ -33,6 +33,7 @@ window.__ModuleLoader__.load({
       tokensOut: '输出',
       noTokens: 'token —',
       failed: '请求失败，请重试',
+      emptyAnswer: '模型这次没有返回正文（输出可能全用在思考上了），请重试或换个模型',
       network: '网络异常，请重试',
       aborted: '已停止，可重新发送',
       stop: '停止',
@@ -121,6 +122,7 @@ window.__ModuleLoader__.load({
       tokensOut: 'out',
       noTokens: 'token —',
       failed: 'Request failed. Try again.',
+      emptyAnswer: 'The model returned no text (its output may have gone to reasoning). Try again or pick another model.',
       network: 'Network error. Try again.',
       aborted: 'Stopped. You can send again.',
       stop: 'Stop',
@@ -1647,6 +1649,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         case 'forbidden': return translate('forbidden')
         case 'body-too-large': return translate('contextTooLong')
         case 'invalid-model': return translate('invalidModel')
+        case 'empty-answer': return translate('emptyAnswer')
         default: return typeof payload?.message === 'string' && payload.message.length > 0
           ? payload.message
           : translate('failed')
@@ -2340,7 +2343,12 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
                 if (current()) setTokens(usage)
               } else if (frame.type === 'error') {
                 failed = true
-                if (current()) setError(typeof frame.message === 'string' ? frame.message : translate('failed'))
+                // The code, not the host's wording, decides what the card says:
+                // a known code gets the card's own language, an unknown one
+                // keeps the message the host sent.
+                if (current()) {
+                  setError(errorMessageOf({ error: frame.code, message: frame.message }, translate))
+                }
               }
             }
           }

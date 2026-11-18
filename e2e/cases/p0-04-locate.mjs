@@ -434,6 +434,34 @@ async function runSteps({ page, url, sessionId, log, assertions }) {
     return `answer received; ${records} highlight=${highlightId}`
   })
 
+  // The reported failure lived here: the second question carries the first
+  // answer as history, so a follow-up exercises the multi-turn request the
+  // first ask never touches.
+  await step(assertions, 'follow-up question streams a second answer', async () => {
+    await page.evaluate(() => document.querySelector('.clipchat-card__ta')?.focus())
+    await page.keyboard.type('E2E_FOLLOWUP_10', { delay: 15 })
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => {
+      const turns = [...document.querySelectorAll('.clipchat-card__turn')]
+      if (turns.length < 2) return false
+      const answer = turns.at(-1).querySelector('.clipchat-card__a')
+      return (answer?.textContent ?? '').includes('E2E_MOCK_ANSWER')
+    }, { timeout: 30_000, polling: 100 })
+    const state = await page.evaluate(() => ({
+      turns: document.querySelectorAll('.clipchat-card__turn').length,
+      error: document.querySelector('.clipchat-card__error')?.textContent ?? null,
+      question: document.querySelectorAll('.clipchat-card__q')[1]?.textContent ?? null,
+    }))
+    if (state.error !== null && state.error.length > 0) {
+      throw new Error(`the follow-up reported an error instead of an answer: ${JSON.stringify(state.error)}`)
+    }
+    // The «问» marker is a CSS pseudo-element, so the text is the question alone.
+    if (state.question !== 'E2E_FOLLOWUP_10') {
+      throw new Error(`the follow-up question is not the second turn: ${JSON.stringify(state.question)}`)
+    }
+    return `${state.turns} turns, second answer streamed`
+  })
+
   await step(assertions, 'return to tail and reload', async () => {
     await page.evaluate(() => {
       const scroller = document.querySelector('[data-conversation-scroll]')

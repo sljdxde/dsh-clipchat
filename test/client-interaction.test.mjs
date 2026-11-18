@@ -214,6 +214,42 @@ test('an empty answer is reported as a failure', async () => {
   })
 })
 
+test('an empty-answer code from the host is shown in the card\'s own words', async () => {
+  // The host answers a finished-but-textless stream with `empty-answer`; the
+  // card must not fall back to the generic "request failed" line, because that
+  // reads as a network problem and hides the real cause.
+  globalThis.fetch = sseFetch([
+    { type: 'meta', provider: 'deepseek', model: 'deepseek-reasoner' },
+    { type: 'usage', usage: { input: 594, output: 2048 } },
+    { type: 'error', code: 'empty-answer', message: '模型这次没有返回正文，请重试或换一个模型' },
+  ]).fetchImpl
+
+  await withCard(async ({ container }) => {
+    await askQuestion(container, 'my question')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+    })
+
+    assert.equal(container.querySelector('.clipchat-card__error').textContent, 'emptyAnswer')
+  })
+})
+
+test('an error frame with an unknown code keeps the host message', async () => {
+  globalThis.fetch = sseFetch([
+    { type: 'meta', provider: 'deepseek', model: 'chat' },
+    { type: 'error', code: 'SOMETHING_NEW', message: 'upstream said no' },
+  ]).fetchImpl
+
+  await withCard(async ({ container }) => {
+    await askQuestion(container, 'my question')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+    })
+
+    assert.equal(container.querySelector('.clipchat-card__error').textContent, 'upstream said no')
+  })
+})
+
 test('a network throw is reported', async () => {
   globalThis.fetch = async (url) => {
     if (String(url).includes('/models')) return { ok: true, json: async () => ({ models: [] }) }
