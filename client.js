@@ -438,7 +438,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-actions__btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
 .clipchat-actions__btn[aria-pressed='true']{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12))}
 .clipchat-actions__btn:disabled{opacity:.5;cursor:default}
-.clipchat-card__records{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding:10px 16px 14px;margin:0}
+/* The records panel is the card's other scroll container, so it needs the same
+   inset the answer area has: its scrollbar would otherwise sit under the east
+   rail too. The 10px comes off the right padding, so a record keeps the 16px
+   gap the answer text has. */
+.clipchat-card__records{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow:auto;border-top:1px solid var(--dsw-alias-border-l3);padding:10px 6px 14px 16px;margin:0 10px 0 0}
 .clipchat-card.is-records .clipchat-card__presets,.clipchat-card.is-records .clipchat-card__thread{display:none}
 .clipchat-card.is-records .clipchat-card__records{border-top:none}
 .clipchat-card__record{flex:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.04));transition:border-color .12s ease,background .12s ease}

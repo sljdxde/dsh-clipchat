@@ -386,18 +386,46 @@ test('the focused resize grip answers the same keys as the title bar', async () 
   })
 })
 
-test('the east resize rail leaves the answer scrollbar its own pixels', async () => {
+/** The east rail's width, read from its own rule. */
+function railWidthOf() {
   const rail = CLIENT_SOURCE.match(/\.clipchat-card__grip--e\{([^}]*)\}/)
   assert.ok(rail, 'the east rail rule is still there')
-  const railWidth = Number(/width:(\d+)px/.exec(rail[1])[1])
-  const thread = CLIENT_SOURCE.match(/\.clipchat-card__thread\{([^}]*)\}/)
-  assert.ok(thread, 'the thread rule is still there')
-  const inset = Number(/margin-right:(\d+)px/.exec(thread[1])?.[1] ?? 0)
+  return Number(/width:(\d+)px/.exec(rail[1])[1])
+}
+
+/** The right-hand inset a rule gives its element, from `margin-right` or `margin`. */
+function rightInsetOf(declarations) {
+  const explicit = /margin-right:([\d.]+)px/.exec(declarations)
+  if (explicit !== null) return Number.parseFloat(explicit[1])
+  const shorthand = /margin:([^;]*)/.exec(declarations)
+  if (shorthand === null) return 0
+  const sides = shorthand[1].trim().split(/\s+/)
+  return Number.parseFloat(sides.length >= 2 ? sides[1] : sides[0])
+}
+
+/**
+ * One scroll container of the card: its scrollbar must be laid out left of the
+ * east rail, which means the container ends at least a rail width inside the
+ * card, and the inset came out of the right padding rather than off the text.
+ */
+function railClearanceOf(selector, label) {
+  const rule = CLIENT_SOURCE.match(new RegExp(`${selector.replaceAll('.', '\\.')}\\{([^}]*)\\}`))
+  assert.ok(rule, `the ${label} rule is still there`)
+  const railWidth = railWidthOf()
+  const inset = rightInsetOf(rule[1])
   assert.ok(inset >= railWidth,
-    `the thread is inset ${inset}px, at least the ${railWidth}px rail, so its scrollbar lands left of the rail`)
-  const padding = /padding:(\d+)px (\d+)px (\d+)px (\d+)px/.exec(thread[1])
-  assert.equal(Number(padding[2]) + inset, Number(padding[4]),
-    'the inset comes out of the right padding, so the text keeps the gap it has on the left and the records panel still lines up')
+    `the ${label} is inset ${inset}px, at least the ${railWidth}px rail, so its scrollbar is laid out left of the rail`)
+  const padding = /padding:(\d+)px (\d+)px (\d+)px (\d+)px/.exec(rule[1])
+  assert.ok(padding, `the ${label} states its padding on four sides`)
+  return { textGap: Number(padding[2]) + inset, leftGap: Number(padding[4]) }
+}
+
+test('the east rail leaves every scroll container its own scrollbar', async () => {
+  const answer = railClearanceOf('.clipchat-card__thread', 'answer area')
+  const records = railClearanceOf('.clipchat-card__records', 'records panel')
+  assert.equal(answer.textGap, answer.leftGap, 'the answer text keeps the gap it has on the left')
+  assert.equal(records.textGap, records.leftGap, 'the records panel does too')
+  assert.equal(records.textGap, answer.textGap, 'so the two views line up with each other')
 })
 
 test('a card that cannot be measured ignores keyboard geometry', async () => {
