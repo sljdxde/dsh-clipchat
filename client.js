@@ -246,6 +246,26 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card__list li::marker{color:var(--dsw-alias-label-secondary,#666)}
 .clipchat-card__quote{margin:8px 0 0;padding:2px 0 2px 10px;border-left:2px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary,#666);white-space:pre-wrap}
 .clipchat-card__a code{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12.5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12));border-radius:4px;padding:1px 4px}
+/* A fenced block: one literal text node, scrolling sideways instead of
+   wrapping, because a wrapped code line lies about its own shape. */
+.clipchat-card__code{margin:9px 0 0;border:1px solid var(--dsw-alias-border-l3);border-radius:9px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));overflow:hidden}
+.clipchat-card__pre{margin:0;padding:2px 11px 9px;overflow-x:auto;font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12.5px;line-height:1.6;tab-size:2;white-space:pre}
+/* The language sits above the code instead of over it: an absolutely placed
+   badge would cover the end of the first line, which is usually the longest. */
+.clipchat-card__lang{display:block;padding:5px 11px 0;text-align:right;font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:10.5px;line-height:1.3;color:var(--dsw-alias-label-secondary,#666);opacity:.65}
+.clipchat-card__code>:first-child.clipchat-card__pre{padding-top:9px}
+.clipchat-card__a .clipchat-card__pre code{background:none;padding:0;border-radius:0;font-size:12.5px;line-height:inherit}
+/* A table scrolls inside its own box: a wide grid must not widen the card. */
+.clipchat-card__tablewrap{margin:9px 0 0;overflow-x:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:9px}
+.clipchat-card__table{border-collapse:collapse;width:100%;table-layout:auto;font-size:12.5px;line-height:1.6}
+.clipchat-card__table th,.clipchat-card__table td{border-bottom:1px solid var(--dsw-alias-border-l3);border-right:1px solid var(--dsw-alias-border-l3);padding:5px 9px;text-align:left;vertical-align:top;white-space:pre-wrap}
+.clipchat-card__table tr>:last-child{border-right:none}
+.clipchat-card__table tbody tr:last-child>*{border-bottom:none}
+.clipchat-card__th{font-weight:600;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08))}
+.clipchat-card__hr{margin:12px 0 0;border:none;border-top:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l3))}
+.clipchat-card__a a{color:var(--dsw-alias-brand-primary,#2f6fed);text-decoration:none}
+.clipchat-card__a a:hover{text-decoration:underline}
+.clipchat-card__a>:first-child{margin-top:0}
 .clipchat-card__turn-actions{display:flex;gap:6px;margin-top:6px;justify-content:flex-end}
 .clipchat-card__copy{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11px;line-height:1.4;cursor:pointer;border-radius:999px;padding:1px 8px;transition:background .12s ease,color .12s ease}
 .clipchat-card__copy:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
@@ -1721,79 +1741,300 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     }
 
     /**
-     * Split an answer into display blocks: headings, lists, quotes, paragraphs.
+     * Split one Markdown table row into its cells.
+     *
+     * A row is `a | b | c`: the outer pipes are optional and an escaped `\|`
+     * belongs to its cell, which is the only escape an answer ever contains.
+     *
+     * @param {string} line - one table row.
+     * @returns {string[]} the cells, outer pipes and padding removed.
+     */
+    function tableCells(line) {
+      let body = line.trim()
+      if (body.startsWith('|')) body = body.slice(1)
+      if (body.endsWith('|') && !body.endsWith('\\|')) body = body.slice(0, -1)
+      const cells = []
+      let cell = ''
+      for (let index = 0; index < body.length; index += 1) {
+        const char = body[index]
+        if (char === '\\' && index + 1 < body.length) {
+          cell += body[index + 1]
+          index += 1
+          continue
+        }
+        if (char === '|') {
+          cells.push(cell.trim())
+          cell = ''
+          continue
+        }
+        cell += char
+      }
+      cells.push(cell.trim())
+      return cells
+    }
+
+    /**
+     * The alignment one `|---|:--:|` cell asks for, or null for no preference.
+     * @param {string} cell - one delimiter cell.
+     * @returns {'left' | 'center' | 'right' | null} the alignment.
+     */
+    function alignmentOf(cell) {
+      const leading = cell.startsWith(':')
+      const trailing = cell.endsWith(':')
+      if (leading && trailing) return 'center'
+      if (trailing) return 'right'
+      if (leading) return 'left'
+      return null
+    }
+
+    /**
+     * Read a GFM table that starts at `index`, or null when those lines are not
+     * one.
+     *
+     * The delimiter row is what makes a block a table: a line may hold a pipe
+     * as ordinary text, and only `|---|:--:|` underneath says the reader meant
+     * a grid. Recognition therefore needs one line of lookahead, which is also
+     * what stops a streaming answer from printing the pipes as text for long.
+     *
+     * @param {string[]} lines - the answer, split.
+     * @param {number} index - line the header would be on.
+     * @returns {{ block: object, next: number } | null} the table and the first line after it.
+     */
+    function tableAt(lines, index) {
+      const delimiter = lines[index + 1]
+      // A table at the very end of the answer has no delimiter row yet, which
+      // is exactly what a streaming answer looks like one line in.
+      if (delimiter === undefined) return null
+      const header = lines[index]
+      if (!header.includes('|') || !delimiter.includes('|')) return null
+      const head = tableCells(header)
+      const markers = tableCells(delimiter)
+      if (markers.length !== head.length) return null
+      if (!markers.every((cell) => /^:?-+:?$/u.test(cell))) return null
+      const align = markers.map(alignmentOf)
+      const rows = []
+      let cursor = index + 2
+      while (cursor < lines.length) {
+        const row = lines[cursor]
+        // A row keeps the grid going; anything without a pipe is prose again.
+        if (row.trim().length === 0 || !row.includes('|')) break
+        const cells = tableCells(row)
+        // GFM drops extra cells and pads missing ones, so every row is a full
+        // row and the renderer never has to guard its column count.
+        rows.push(head.map((_, column) => cells[column] ?? ''))
+        cursor += 1
+      }
+      return { block: { kind: 'table', head, align, rows }, next: cursor }
+    }
+
+    /**
+     * The opening line of a fenced code block.
+     * @param {string} trimmed - line without indentation.
+     * @returns {{ char: string, size: number, lang: string } | null} fence character, run length and language.
+     */
+    function fenceOpening(trimmed) {
+      const match = /^(`{3,}|~{3,})(.*)$/u.exec(trimmed)
+      if (match === null) return null
+      return { char: match[1][0], size: match[1].length, lang: match[2].trim().split(/\s+/u)[0] }
+    }
+
+    /**
+     * Whether a line closes the fence it follows.
+     * @param {string} trimmed - line without indentation.
+     * @param {{ char: string, size: number }} fence - the opening fence.
+     * @returns {boolean} true when the line is a closing fence.
+     */
+    function isFenceClose(trimmed, fence) {
+      let run = 0
+      while (run < trimmed.length && trimmed[run] === fence.char) run += 1
+      return run >= fence.size && trimmed.slice(run).trim().length === 0
+    }
+
+    /**
+     * A horizontal rule: three or more `-`, `*` or `_`, spaces between allowed.
+     * @param {string} trimmed - line without indentation.
+     * @returns {boolean} true when the line is a rule.
+     */
+    function isRule(trimmed) {
+      return /^(?:-{3,}|\*{3,}|_{3,})$/u.test(trimmed.replace(/\s+/gu, ''))
+    }
+
+    /**
+     * One list marker line.
+     * @param {string} trimmed - line without indentation.
+     * @returns {{ ordered: boolean, text: string } | null} the item, or null when the line is not one.
+     */
+    function listMarkerOf(trimmed) {
+      const bullet = /^[-*+]\s+(.*)$/u.exec(trimmed)
+      if (bullet !== null) return { ordered: false, text: bullet[1] }
+      const numbered = /^\d{1,9}[.)]\s+(.*)$/u.exec(trimmed)
+      if (numbered !== null) return { ordered: true, text: numbered[1] }
+      return null
+    }
+
+    /**
+     * Add one list item to the list its indentation belongs to.
+     *
+     * Indentation decides the level — a deeper line opens a child list under the
+     * item above it and a shallower one closes levels until it fits. A level that
+     * changes marker type starts a sibling list, because a bullet under a number
+     * is a different list, not a relabelled one.
+     *
+     * @param {{ blocks: object[], lists: object[] }} state - the answer being built; `lists` is the open-level stack.
+     * @param {{ ordered: boolean, indent: number, text: string }} item - one marker line.
+     */
+    function pushListItem(state, item) {
+      const { lists, blocks } = state
+      while (lists.length > 0 && item.indent < lists[lists.length - 1].indent) lists.pop()
+      const open = (container) => {
+        const block = { kind: item.ordered ? 'ol' : 'ul', ordered: item.ordered, items: [] }
+        container.push(block)
+        const level = { indent: item.indent, ordered: item.ordered, items: block.items, container }
+        lists.push(level)
+        return level
+      }
+      const host = lists[lists.length - 1]
+      let level = host
+      if (host === undefined) {
+        level = open(blocks)
+      } else if (item.indent > host.indent) {
+        level = open(host.items[host.items.length - 1].children)
+      } else if (host.ordered !== item.ordered) {
+        lists.pop()
+        level = open(host.container)
+      }
+      level.items.push({ text: item.text, children: [] })
+    }
+
+    /**
+     * Split an answer into display blocks.
      *
      * Answers arrive as Markdown and the card used to print the raw text, so
-     * `### 标题` and `- 要点` showed up as literal characters. Only the shapes
-     * that actually appear in answers are recognised; anything else stays a
-     * paragraph, and nothing is ever parsed as HTML.
+     * `### 标题`, `- 要点` and a table's pipes all showed up as literal
+     * characters. The shapes an answer actually uses are recognised here —
+     * fenced code, tables, headings, nested lists, quotes, rules — and anything
+     * else stays a paragraph. Nothing is parsed as HTML, and nothing inside a
+     * code block is read as markup.
      *
      * @param {unknown} text - answer text.
-     * @returns {Array<{ kind: string, level?: number, ordered?: boolean, text?: string, items?: string[] }>} blocks.
+     * @returns {Array<object>} blocks in display order.
      */
     function answerBlocks(text) {
       if (typeof text !== 'string' || text.length === 0) return []
       const lines = text.replace(/\r\n/gu, '\n').split('\n')
       const blocks = []
+      const lists = []
       let paragraph = []
-      let list = null
       const flushParagraph = () => {
         if (paragraph.length === 0) return
         blocks.push({ kind: 'p', text: paragraph.join('\n') })
         paragraph = []
       }
-      const flushList = () => {
-        if (list === null) return
-        blocks.push(list)
-        list = null
+      // A list stays open across a blank line (that is a loose list, not two
+      // lists) and is closed by the first line that is not part of it.
+      const closeLists = () => {
+        lists.length = 0
       }
-      for (const line of lines) {
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]
         const trimmed = line.trim()
         if (trimmed.length === 0) {
           flushParagraph()
-          flushList()
           continue
         }
+
+        const fence = fenceOpening(trimmed)
+        if (fence !== null) {
+          flushParagraph()
+          closeLists()
+          const body = []
+          index += 1
+          while (index < lines.length && !isFenceClose(lines[index].trim(), fence)) {
+            body.push(lines[index])
+            index += 1
+          }
+          // An unclosed fence still renders as code: that is what a streaming
+          // answer looks like between the opening and closing ticks.
+          blocks.push({ kind: 'code', lang: fence.lang, text: body.join('\n') })
+          continue
+        }
+
         const heading = /^(#{1,6})\s+(.*)$/u.exec(trimmed)
         if (heading !== null) {
           flushParagraph()
-          flushList()
+          closeLists()
           blocks.push({ kind: 'h', level: Math.min(heading[1].length, 4), text: heading[2] })
           continue
         }
-        const bullet = /^[-*+]\s+(.*)$/u.exec(trimmed)
-        if (bullet !== null) {
+
+        const table = tableAt(lines, index)
+        if (table !== null) {
           flushParagraph()
-          if (list === null || list.ordered === true) {
-            flushList()
-            list = { kind: 'ul', ordered: false, items: [] }
-          }
-          list.items.push(bullet[1])
+          closeLists()
+          blocks.push(table.block)
+          index = table.next - 1
           continue
         }
-        const ordered = /^\d+[.)]\s+(.*)$/u.exec(trimmed)
-        if (ordered !== null) {
+
+        if (isRule(trimmed)) {
           flushParagraph()
-          if (list === null || list.ordered !== true) {
-            flushList()
-            list = { kind: 'ol', ordered: true, items: [] }
-          }
-          list.items.push(ordered[1])
+          closeLists()
+          blocks.push({ kind: 'hr' })
           continue
         }
+
+        const marker = listMarkerOf(trimmed)
+        if (marker !== null) {
+          flushParagraph()
+          const indent = line.length - line.trimStart().length
+          pushListItem({ blocks, lists }, { ordered: marker.ordered, indent, text: marker.text })
+          continue
+        }
+
+        // A deeper, unmarked line continues the item above it.
+        const list = lists[lists.length - 1]
+        if (list !== undefined && line.length - line.trimStart().length > list.indent) {
+          const item = list.items[list.items.length - 1]
+          item.text = `${item.text}\n${trimmed}`
+          continue
+        }
+
         const quote = /^>\s?(.*)$/u.exec(trimmed)
         if (quote !== null) {
           flushParagraph()
-          flushList()
-          blocks.push({ kind: 'quote', text: quote[1] })
+          closeLists()
+          // Consecutive quote lines are one quotation, not one box each.
+          const quoted = [quote[1]]
+          while (index + 1 < lines.length && /^>\s?/u.test(lines[index + 1].trim())) {
+            index += 1
+            quoted.push(lines[index].trim().replace(/^>\s?/u, ''))
+          }
+          blocks.push({ kind: 'quote', text: quoted.join('\n') })
           continue
         }
-        flushList()
+
+        closeLists()
         paragraph.push(line)
       }
       flushParagraph()
-      flushList()
       return blocks
+    }
+
+    /**
+     * One list as plain text, nesting kept as indentation so a flattened
+     * clipboard line still reads in the right order.
+     * @param {object} block - a `ul` or `ol` block.
+     * @param {number} depth - nesting level, 0 for the outermost list.
+     * @returns {string} the list, one item or child per line.
+     */
+    function plainList(block, depth) {
+      const pad = '  '.repeat(depth)
+      const lines = []
+      block.items.forEach((item, index) => {
+        lines.push(`${pad}${block.ordered === true ? `${index + 1}. ` : '- '}${plainInline(item.text)}`)
+        for (const child of item.children) lines.push(plainList(child, depth + 1))
+      })
+      return lines.join('\n')
     }
 
     /**
@@ -1804,14 +2045,18 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      */
     function answerPlain(text) {
       return answerBlocks(text).map((block) => {
-        if (block.kind === 'h') return block.text
-        if (block.kind === 'quote') return `“${block.text}”`
-        if (block.kind === 'ul' || block.kind === 'ol') {
-          return block.items
-            .map((item, index) => `${block.ordered === true ? `${index + 1}. ` : '- '}${item}`)
+        // A code block is copied verbatim: its markers are not markup.
+        if (block.kind === 'code') return block.text
+        if (block.kind === 'h') return plainInline(block.text)
+        if (block.kind === 'hr') return '---'
+        if (block.kind === 'quote') return `“${plainInline(block.text)}”`
+        if (block.kind === 'table') {
+          return [block.head, ...block.rows]
+            .map((row) => row.map((cell) => plainInline(cell)).join('\t'))
             .join('\n')
         }
-        return block.text
+        if (block.kind === 'ul' || block.kind === 'ol') return plainList(block, 0)
+        return plainInline(block.text)
       }).join('\n\n')
     }
 
@@ -1937,24 +2182,118 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     }
 
     /**
-     * Flatten one answer into plain, bold and code parts. Only `**bold**` and
-     * `` `code` `` are recognized; every other character stays literal text.
+     * Flatten one line into text, bold, code, link and strikethrough parts.
+     *
+     * Only the inline shapes an answer uses are recognised — `**bold**`,
+     * `` `code` ``, `[label](https://…)`, `~~strike~~`. A link is only a link
+     * when its target is http(s): any other scheme keeps its label as plain
+     * text, so a model cannot smuggle `javascript:` into the page and the
+     * reader never sees the raw brackets of a relative path either.
+     *
      * @param {string} text - answer text.
-     * @returns {Array<{ text: string, strong?: boolean, code?: boolean }>} parts.
+     * @returns {Array<{ text: string, strong?: boolean, code?: boolean, href?: string, strike?: boolean }>} parts.
      */
     function inlineParts(text) {
       if (typeof text !== 'string' || text.length === 0) return []
       const parts = []
-      const pattern = /\*\*([\s\S]+?)\*\*|`([^`\n]+)`/gu
+      const pattern = /\*\*([\s\S]+?)\*\*|`([^`\n]+)`|(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(?<!!)\[([^\]\n]+)\]\([^)\s]*\)|~~([^~\n]+)~~/gu
       let last = 0
       for (const match of text.matchAll(pattern)) {
         if (match.index > last) parts.push({ text: text.slice(last, match.index) })
         if (match[1] !== undefined) parts.push({ text: match[1], strong: true })
-        else parts.push({ text: match[2], code: true })
+        else if (match[2] !== undefined) parts.push({ text: match[2], code: true })
+        else if (match[3] !== undefined) parts.push({ text: match[3], href: match[4] })
+        else if (match[5] !== undefined) parts.push({ text: match[5] })
+        else parts.push({ text: match[6], strike: true })
         last = match.index + match[0].length
       }
       if (last < text.length) parts.push({ text: text.slice(last) })
       return parts
+    }
+
+    /**
+     * One line of answer text as the reader sees it: inline markers dropped.
+     * @param {string} text - answer text.
+     * @returns {string} plain text.
+     */
+    function plainInline(text) {
+      return inlineParts(text).map((part) => part.text).join('')
+    }
+
+    /**
+     * One line of answer text as inline nodes.
+     * @param {string} text - answer text.
+     * @param {string} prefix - key prefix of the block that holds it.
+     * @returns {Array<object|string>} nodes.
+     */
+    function inlineView(text, prefix) {
+      return inlineParts(text).map((part, index) => {
+        const key = `${prefix}:${index}`
+        if (part.code === true) return h('code', { key }, part.text)
+        if (part.strong === true) return h('strong', { key }, part.text)
+        if (part.href !== undefined) {
+          return h('a', { key, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, part.text)
+        }
+        if (part.strike === true) return h('del', { key }, part.text)
+        return part.text
+      })
+    }
+
+    /**
+     * One list and its nested lists as nodes.
+     * @param {object} block - a `ul` or `ol` block.
+     * @param {string} key - key prefix.
+     * @returns {object} a list node.
+     */
+    function listView(block, key) {
+      return h(block.ordered === true ? 'ol' : 'ul', { key, className: 'clipchat-card__list' },
+        block.items.map((item, index) => h('li', { key: `${key}:${index}` },
+          inlineView(item.text, `${key}:${index}`),
+          item.children.map((child, childIndex) => listView(child, `${key}:${index}:${childIndex}`)))))
+    }
+
+    /**
+     * Render one parsed answer as nodes.
+     *
+     * A code block is a single text node on purpose: its content is literal, so
+     * no `**` inside it becomes bold and no long line is re-wrapped. A table
+     * gets a scroll container, because a grid wider than the card must not
+     * widen the card itself.
+     *
+     * @param {unknown} text - answer text.
+     * @returns {Array<object>} nodes.
+     */
+    function answerView(text) {
+      return answerBlocks(text).map((block, index) => {
+        const key = `${index}:${block.kind}`
+        if (block.kind === 'h') {
+          return h(`h${block.level + 2}`, { key, className: 'clipchat-card__h' }, inlineView(block.text, key))
+        }
+        if (block.kind === 'code') {
+          return h('div', { key, className: 'clipchat-card__code' },
+            block.lang.length > 0 ? h('span', { className: 'clipchat-card__lang' }, block.lang) : null,
+            h('pre', { className: 'clipchat-card__pre' }, h('code', null, block.text)))
+        }
+        if (block.kind === 'table') {
+          const cellOf = (tag, text, column, rowKey) => h(tag, {
+            key: `${rowKey}:${column}`,
+            className: tag === 'th' ? 'clipchat-card__th' : 'clipchat-card__td',
+            style: block.align[column] === null ? undefined : { textAlign: block.align[column] },
+          }, inlineView(text, `${rowKey}:${column}`))
+          return h('div', { key, className: 'clipchat-card__tablewrap' },
+            h('table', { className: 'clipchat-card__table' },
+              h('thead', null, h('tr', null,
+                block.head.map((text, column) => cellOf('th', text, column, `${key}:head`)))),
+              h('tbody', null, block.rows.map((row, rowIndex) => h('tr', { key: rowIndex },
+                row.map((text, column) => cellOf('td', text, column, `${key}:${rowIndex}`)))))))
+        }
+        if (block.kind === 'hr') return h('hr', { key, className: 'clipchat-card__hr' })
+        if (block.kind === 'quote') {
+          return h('blockquote', { key, className: 'clipchat-card__quote' }, inlineView(block.text, key))
+        }
+        if (block.kind === 'ul' || block.kind === 'ol') return listView(block, key)
+        return h('p', { key, className: 'clipchat-card__p' }, inlineView(block.text, key))
+      })
     }
 
     /**
@@ -2750,29 +3089,6 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
               tokens: `≈${(stripRows.tokens / 1000).toFixed(1)}k tok`,
             }))))
 
-      /** Inline markup: only `**bold**` and `` `code` `` are styled. */
-      const inlineView = (text, prefix) => inlineParts(text).map((part, index) => {
-        if (part.code === true) return h('code', { key: `${prefix}:${index}` }, part.text)
-        if (part.strong === true) return h('strong', { key: `${prefix}:${index}` }, part.text)
-        return part.text
-      })
-
-      /** Render an answer as blocks instead of printing its Markdown. */
-      const answerView = (text) => answerBlocks(text).map((block, index) => {
-        const key = `${index}:${block.kind}`
-        if (block.kind === 'h') {
-          return h(`h${block.level + 2}`, { key, className: 'clipchat-card__h' }, inlineView(block.text, key))
-        }
-        if (block.kind === 'quote') {
-          return h('blockquote', { key, className: 'clipchat-card__quote' }, inlineView(block.text, key))
-        }
-        if (block.kind === 'ul' || block.kind === 'ol') {
-          return h(block.kind === 'ol' ? 'ol' : 'ul', { key, className: 'clipchat-card__list' },
-            block.items.map((item, itemIndex) => h('li', { key: `${key}:${itemIndex}` }, inlineView(item, `${key}:${itemIndex}`))))
-        }
-        return h('p', { key, className: 'clipchat-card__p' }, inlineView(block.text, key))
-      })
-
       /** Copy one turn's answer; a denied clipboard must not break the card. */
       const copyTurn = async (turn, index) => {
         if (turn.answer.length === 0) return
@@ -3157,6 +3473,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         presetList,
         inlineParts,
         answerBlocks,
+        answerView,
         answerPlain,
         threadTurns,
         turnOf,

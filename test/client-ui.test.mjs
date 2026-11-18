@@ -160,8 +160,8 @@ test('an answer renders as blocks instead of raw Markdown', async () => {
   assert.deepEqual(blocks.map((block) => block.kind), ['h', 'p', 'ul', 'ol', 'quote'])
   assert.equal(blocks[0].level, 3)
   assert.equal(blocks[0].text, '它要解决的问题')
-  assert.deepEqual(blocks[2].items, ['要点一', '要点二'])
-  assert.deepEqual(blocks[3].items, ['第一步', '第二步'])
+  assert.deepEqual(blocks[2].items.map((item) => item.text), ['要点一', '要点二'])
+  assert.deepEqual(blocks[3].items.map((item) => item.text), ['第一步', '第二步'])
   assert.equal(blocks[4].text, '引用一句')
 })
 

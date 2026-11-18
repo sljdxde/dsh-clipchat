@@ -1,6 +1,6 @@
 {
   "name": "dsh-clipchat",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Select a passage in a reply, ask about it in place, keep asking, and mark what matters.",
   "license": "MIT",
   "homepage": "https://github.com/sljdxde/dsh-clipchat#readme",

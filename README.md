@@ -17,7 +17,7 @@ dsh plugin --profile web add dsh-clipchat
 - **就近卡片**：选段栏、4 个快捷提问（解释这段 / 翻译 / 找问题 / 举个例子）、问答线程、流式回答、停止生成、输入输出 token。
 - **问答线程**：提问与回答分别成块（提问带底色与「问」标记，回答带绿色竖线），每条回答可单独复制；发送后输入框自动清空，等待下一次提问。
 - **详细回答**：输入框下方一个 30px 开关，默认关闭。关闭时注入选段 + 整条消息 + 同轮前后 + 前 3 轮；开启后改注整个会话的分层摘要（历史轮次 + 工具名 + 压缩摘要），代价读数与注入明细都在开关上。宿主读不到日志时自动降级回近轮上下文。
-- **回答排版**：回答按 Markdown 渲染标题、列表、引用与段落（不支持表格、代码块、图片），只保留 `**加粗**` 与 `` `行内代码` `` 两种行内样式。
+- **回答排版**：回答按 Markdown 渲染标题、嵌套列表、引用、分隔线、管道表格（含列对齐，宽表在框内横向滚动）与围栏代码块（按语言标注，内容逐字保留、不换行、不解释行内标记）；行内支持 `**加粗**`、`` `行内代码` ``、`[文字](https://…)` 与 `~~删除线~~`。图片仍不支持，`![…](…)` 原样显示。复制回答时行内标记会被去掉，表格按制表符分隔。
 - **连续追问**：同一张卡片里继续问，历史随请求一起带走。
 - **可复制**：每条回答下方有「复制」按钮，答案文本也可以直接选中复制；点击卡片内部不会关闭卡片，点卡片外才关闭。
 - **模型选择**：默认跟随主会话，也可为某段选段固定一个模型，选择随高亮保存。
@@ -67,7 +67,10 @@ dsh plugin --profile web add dsh-clipchat
 ```sh
 npm run check   # 语法检查 + 全量测试（无需安装依赖）
 npm test        # 只跑测试
+node scripts/preview-markdown.mjs   # 把一份含表格/代码块/嵌套列表的回答用真实样式渲染成 PNG
 ```
+
+`scripts/preview-markdown.mjs` 用 `client.js` 自己的渲染函数和样式表生成 `artifacts/markdown-preview/preview.html`，再用系统 Chrome 截图成 `preview.png`：排版改动只看单测的元素树不够，最终看的是这张图。
 
 `npm run check` 也会由 `.githooks/pre-commit` 在提交时执行。每个克隆启用一次：
 
@@ -153,7 +156,7 @@ npm run coverage   # 只跑覆盖率报告
 
 ## 如何跑 E2E
 
-`npm run e2e` 用本机真实的 DSH Web + 系统 Chrome 跑 P0-4：聊天历史滚动到第 36-60 轮后，从记录面板点「定位」，第 10 轮必须被挂载、下划线居中、卡片关闭。
+`npm run e2e` 用本机真实的 DSH Web + 系统 Chrome 跑 P0-4：聊天历史滚动到第 36-60 轮后，从记录面板点「定位」，第 10 轮必须被挂载、下划线居中、卡片关闭。同一次运行还会检查回答的渲染：mock 模型返回一份带表格、代码块和嵌套列表的 Markdown，卡片里必须出现真实的 `<table>`（含列对齐）、`<pre><code>`（含语言标注）和嵌套 `<li>`，不能残留 `|---` 或 ``` 原文，并给表格和代码块各截一张图。
 
 前置条件：
 
@@ -197,6 +200,8 @@ node e2e/run.mjs --browser-smoke  # prepare 后启动 Chrome、截 about:blank�
 | `failure-p0-04.png` | 失败时的全页截图 | 失败时 |
 | `failure-p0-04.html` | 失败瞬间的 DOM | 失败时 |
 | `browser-smoke.png` | `--browser-smoke` 的 about:blank 截图 | 仅该模式 |
+| `p0-04-markdown-table.png` | 卡片里渲染出的表格 | 每次（用例走到那一步） |
+| `p0-04-markdown-code.png` | 卡片里渲染出的代码块与嵌套列表 | 每次（用例走到那一步） |
 
 `--prepare-only` 默认保留 `result.json`、`env.json`、`mock-llm.log`（不启动 Web，所以没有 `web.log`；`fixture.log` 仅失败或 `E2E_KEEP_LOGS=1` 时保留）；`--browser-smoke` 另加 `browser-smoke.png`，同样不启动 Web。
 

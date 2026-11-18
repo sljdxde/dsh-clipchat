@@ -7,6 +7,8 @@
  * plugin's own rendered classes. It never reaches into React state, so it keeps
  * testing the same path a person drives.
  */
+import { join } from 'node:path'
+
 import { ANCHOR, TARGET_TURN } from '../lib/fixture.mjs'
 
 /** Fixed viewport the case assumes (set by the browser launcher). */
@@ -367,10 +369,10 @@ async function measureCentred(page, highlightId) {
  * @param {(line: string) => void} context.log - line sink.
  * @returns {Promise<{assertions: object[]}>} recorded assertions.
  */
-export async function run({ page, url, sessionId, log }) {
+export async function run({ page, url, sessionId, log, paths }) {
   const assertions = []
   try {
-    return await runSteps({ page, url, sessionId, log, assertions })
+    return await runSteps({ page, url, sessionId, log, assertions, artifactsDir: paths?.artifactsDir })
   } catch (error) {
     if (!assertions.some((assertion) => assertion.passed === false)) {
       assertions.push({ name: 'case-error', passed: false, detail: `${error?.name ?? 'Error'}: ${error?.message ?? error}` })
@@ -387,7 +389,7 @@ export async function run({ page, url, sessionId, log }) {
  * @param {object} context - runner context plus the accumulator.
  * @returns {Promise<{assertions: object[]}>} recorded assertions.
  */
-async function runSteps({ page, url, sessionId, log, assertions }) {
+async function runSteps({ page, url, sessionId, log, assertions, artifactsDir }) {
   await page.setViewport(VIEWPORT)
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   let highlightId = null
@@ -432,6 +434,57 @@ async function runSteps({ page, url, sessionId, log, assertions }) {
     // will bring back into view.
     highlightId = await targetHighlightId(page, TARGET_TURN)
     return `answer received; ${records} highlight=${highlightId}`
+  })
+
+  // The answer arrives as Markdown. If the card prints it raw, the reader sees
+  // pipes and backticks instead of a grid and a code block, which is exactly
+  // what 0.1.2 did.
+  await step(assertions, 'the answer renders a table, a code block and a nested list', async () => {
+    const shape = await page.evaluate(() => {
+      const answer = document.querySelector('.clipchat-card__a')
+      if (answer === null) return { missing: 'no answer element' }
+      const wrap = answer.querySelector('.clipchat-card__tablewrap')
+      const text = answer.textContent ?? ''
+      return {
+        head: answer.querySelectorAll('table thead th').length,
+        rows: answer.querySelectorAll('table tbody tr').length,
+        firstCell: answer.querySelector('table tbody td')?.textContent ?? null,
+        aligned: answer.querySelectorAll('table thead th')[2]?.style.textAlign ?? null,
+        code: answer.querySelector('pre code')?.textContent ?? null,
+        lang: answer.querySelector('.clipchat-card__lang')?.textContent ?? null,
+        nested: answer.querySelector('.clipchat-card__list li .clipchat-card__list li')?.textContent ?? null,
+        rawPipes: text.includes('|---'),
+        rawFence: text.includes('```'),
+        scrolls: wrap === null ? null : wrap.scrollWidth <= wrap.clientWidth + 1,
+      }
+    })
+    if (shape.missing !== undefined) throw new Error(shape.missing)
+    if (shape.head !== 3 || shape.rows !== 2) throw new Error(`table shape is wrong: ${JSON.stringify(shape)}`)
+    if (shape.firstCell !== '默认') throw new Error(`table body is not the mock answer: ${JSON.stringify(shape.firstCell)}`)
+    if (shape.aligned !== 'right') throw new Error(`the column alignment was dropped: ${JSON.stringify(shape.aligned)}`)
+    if (shape.code !== 'const plan = { tier: "default", tokens: 2600 }') {
+      throw new Error(`the code block text is wrong: ${JSON.stringify(shape.code)}`)
+    }
+    if (shape.lang !== 'js') throw new Error(`the code language label is missing: ${JSON.stringify(shape.lang)}`)
+    if (shape.nested !== '再从最近一轮往前加') throw new Error(`the nested list item is missing: ${JSON.stringify(shape.nested)}`)
+    if (shape.rawPipes || shape.rawFence) throw new Error(`raw Markdown is still printed: ${JSON.stringify(shape)}`)
+    if (shape.scrolls === false) throw new Error('the table is wider than its scroll box')
+
+    // Two shots: the grid and the code block cannot both be inside a card that
+    // scrolls, and either one alone would understate the fix.
+    const shots = []
+    for (const [name, selector] of [['table', '.clipchat-card__tablewrap'], ['code', '.clipchat-card__code']]) {
+      await page.evaluate((css) => {
+        document.querySelector(css)?.scrollIntoView({ block: 'center' })
+      }, selector)
+      await sleep(200)
+      const card = await page.$('.clipchat-card')
+      if (card === null) throw new Error('the card closed before it could be photographed')
+      const file = join(artifactsDir ?? '.', `p0-04-markdown-${name}.png`)
+      await card.screenshot({ path: file })
+      shots.push(file.slice(file.lastIndexOf('/') + 1))
+    }
+    return `table 3×2, aligned column, js code block, nested item; shots ${shots.join(', ')}`
   })
 
   // The reported failure lived here: the second question carries the first
