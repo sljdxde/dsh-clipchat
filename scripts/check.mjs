@@ -192,11 +192,13 @@ export function resolveExemption(file, allowed) {
  */
 function parseCoverageTable(report) {
   const rows = []
-  // A row is `# <name> | line% | branch% | func% | uncovered`; the name column
-  // is indented for a file inside a directory group, and the group itself has
-  // no percentages.
-  const rowPattern = /^#\s+(\S+)\s+\|\s+([\d.]+)\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s*(.*)$/u
-  const groupPattern = /^#\s+(\S+)\s+\|\s*\|\s*\|\s*\|\s*$/u
+  // A row is `<marker> <name> | line% | branch% | func% | uncovered`; the name
+  // column is indented for a file inside a directory group, and the group itself
+  // has no percentages. The marker is `#` up to Node 22 and `ℹ` from Node 24's
+  // spec reporter, so both are accepted; a gate that stops matching would report
+  // a passing run over an empty table.
+  const rowPattern = /^(?:#|ℹ)\s*(\S+)\s+\|\s+([\d.]+)\s+\|\s+[\d.]+\s+\|\s+[\d.]+\s+\|\s*(.*)$/u
+  const groupPattern = /^(?:#|ℹ)\s*(\S+)\s*\|\s*\|\s*\|\s*\|\s*$/u
   let group = ''
   for (const raw of report.split('\n')) {
     const trimmed = raw.trimEnd()

@@ -45,6 +45,17 @@ function row(file, percent, uncovered) {
   return `#  ${file.padEnd(28)} | ${percent.toFixed(2).padStart(6)} |    88.00 |  100.00 | ${uncovered}`
 }
 
+/**
+ * The same row as Node 24's spec reporter prints it.
+ *
+ * The marker changed from `#` to `ℹ`, and the gate read the table by marker, so
+ * a Node upgrade turned the check red with "no coverage table was found". These
+ * fixtures keep both spellings parsed.
+ */
+function node24Row(file, percent, uncovered, indent = '') {
+  return `ℹ ${indent}${file.padEnd(28)} | ${percent.toFixed(2).padStart(6)} |    88.00 |  100.00 | ${uncovered}`
+}
+
 test('a fully covered file passes', () => {
   const report = [
     '# file                           | line % | branch % | funcs % | uncovered lines',
@@ -112,4 +123,30 @@ test('test files are not audited', () => {
 
 test('a report with no table fails instead of passing silently', () => {
   assert.deepEqual(audit('no coverage here'), ['no coverage table was found in the test output'])
+})
+
+test('the table node 24 spec reporter prints is read the same way', () => {
+  const report = [
+    'ℹ file                           | line % | branch % | funcs % | uncovered lines',
+    'ℹ --------------------------------------------------------------------------',
+    node24Row('client.js', 100, ''),
+    node24Row('index.js', 100, ''),
+    'ℹ lib         |        |         |        | ',
+    node24Row('context.js', 100, '', ' '),
+    node24Row('store.js', 99.6, exemptionRange(), ' '),
+    'ℹ all files   |  99.13 |    88.91 |   91.53 | ',
+  ].join('\n')
+
+  assert.deepEqual(audit(report), [], 'both markers and the directory grouping parse')
+})
+
+test('a node 24 row with a gap is still caught', () => {
+  const report = [
+    'ℹ file                           | line % | branch % | funcs % | uncovered lines',
+    node24Row('client.js', 99.5, '12-14'),
+  ].join('\n')
+
+  const problems = audit(report)
+  assert.equal(problems.length, 1)
+  assert.match(problems[0], /client\.js: uncovered lines 12-14/)
 })
