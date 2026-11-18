@@ -264,7 +264,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
    enough to matter makes its column that wide and the box scrolls. */
 .clipchat-card__tablewrap{margin:9px 0 0;overflow-x:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:9px}
 .clipchat-card__table{border-collapse:collapse;width:100%;table-layout:auto;font-size:12.5px;line-height:1.6}
-.clipchat-card__table th,.clipchat-card__table td{border-bottom:1px solid var(--dsw-alias-border-l3);border-right:1px solid var(--dsw-alias-border-l3);padding:5px 9px;text-align:left;vertical-align:top;white-space:pre-wrap}
+.clipchat-card__table th,.clipchat-card__table td{border-bottom:1px solid var(--dsw-alias-border-l3);border-right:1px solid var(--dsw-alias-border-l3);padding:5px 9px;text-align:left;vertical-align:top;white-space:pre-wrap;min-width:4.5em}
 .clipchat-card__table th{white-space:nowrap}
 .clipchat-card__table tr>:last-child{border-right:none}
 .clipchat-card__table tbody tr:last-child>*{border-bottom:none}
@@ -1748,10 +1748,35 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     }
 
     /**
+     * ASCII punctuation a backslash may escape, per CommonMark.
+     *
+     * Everything else keeps its backslash: a model writing `C:\Users\me` or a
+     * regex like `\d+` means those characters, and dropping the `\` would
+     * silently rewrite the answer.
+     */
+    const ESCAPABLE = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
+
+    /**
+     * Whether the character at `index` is preceded by an odd run of backslashes,
+     * which is what makes it escaped rather than a delimiter after a literal `\`.
+     *
+     * @param {string} text - the line being read.
+     * @param {number} index - position of the character in question.
+     * @returns {boolean} true when the character is escaped.
+     */
+    function isEscapedAt(text, index) {
+      let run = 0
+      while (index - run - 1 >= 0 && text[index - run - 1] === '\\') run += 1
+      return run % 2 === 1
+    }
+
+    /**
      * Split one Markdown table row into its cells.
      *
      * A row is `a | b | c`: the outer pipes are optional and an escaped `\|`
-     * belongs to its cell, which is the only escape an answer ever contains.
+     * belongs to its cell. Only `\|` is resolved here, because a pipe decides
+     * where a cell ends; every other escape is left for the inline pass, which
+     * knows the same CommonMark rule and unescapes it in the cell's text.
      *
      * @param {string} line - one table row.
      * @returns {string[]} the cells, outer pipes and padding removed.
@@ -1759,14 +1784,26 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     function tableCells(line) {
       let body = line.trim()
       if (body.startsWith('|')) body = body.slice(1)
-      if (body.endsWith('|') && !body.endsWith('\\|')) body = body.slice(0, -1)
+      if (body.endsWith('|') && !isEscapedAt(body, body.length - 1)) body = body.slice(0, -1)
       const cells = []
       let cell = ''
       for (let index = 0; index < body.length; index += 1) {
         const char = body[index]
         if (char === '\\' && index + 1 < body.length) {
-          cell += body[index + 1]
-          index += 1
+          const next = body[index + 1]
+          if (next === '|') {
+            cell += '|'
+            index += 1
+            continue
+          }
+          if (ESCAPABLE.includes(next)) {
+            // Keep the pair for inlineParts, which unescapes it in the cell.
+            cell += char + next
+            index += 1
+            continue
+          }
+          // `C:\Users`: the backslash belongs to the text, not to an escape.
+          cell += char
           continue
         }
         if (char === '|') {
@@ -1869,15 +1906,26 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     /**
      * One list marker line.
      * @param {string} trimmed - line without indentation.
-     * @returns {{ ordered: boolean, text: string } | null} the item, or null when the line is not one.
+     * @returns {{ ordered: boolean, start: number, text: string } | null} the item, or null when the line is not one.
      */
     function listMarkerOf(trimmed) {
       const bullet = /^[-*+]\s+(.*)$/u.exec(trimmed)
-      if (bullet !== null) return { ordered: false, text: bullet[1] }
-      const numbered = /^\d{1,9}[.)]\s+(.*)$/u.exec(trimmed)
-      if (numbered !== null) return { ordered: true, text: numbered[1] }
+      if (bullet !== null) return { ordered: false, start: 1, text: bullet[1] }
+      const numbered = /^(\d{1,9})[.)]\s+(.*)$/u.exec(trimmed)
+      if (numbered !== null) return { ordered: true, start: Number.parseInt(numbered[1], 10), text: numbered[2] }
       return null
     }
+
+    /**
+     * Deepest list level kept as nesting.
+     *
+     * `listView` and `plainList` recurse once per level, and a model can emit an
+     * answer whose indentation grows on every line; without a cap a few thousand
+     * levels throw `RangeError` out of render and the whole answer disappears.
+     * Four levels is already deeper than a card can show, and matches the
+     * heading cap.
+     */
+    const MAX_LIST_DEPTH = 4
 
     /**
      * Add one list item to the list its indentation belongs to.
@@ -1885,16 +1933,20 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      * Indentation decides the level — a deeper line opens a child list under the
      * item above it and a shallower one closes levels until it fits. A level that
      * changes marker type starts a sibling list, because a bullet under a number
-     * is a different list, not a relabelled one.
+     * is a different list, not a relabelled one. Nesting deeper than
+     * `MAX_LIST_DEPTH` keeps its text on the deepest open item instead of
+     * opening another level.
      *
      * @param {{ blocks: object[], lists: object[] }} state - the answer being built; `lists` is the open-level stack.
-     * @param {{ ordered: boolean, indent: number, text: string }} item - one marker line.
+     * @param {{ ordered: boolean, start: number, indent: number, text: string }} item - one marker line.
      */
     function pushListItem(state, item) {
       const { lists, blocks } = state
       while (lists.length > 0 && item.indent < lists[lists.length - 1].indent) lists.pop()
       const open = (container) => {
-        const block = { kind: item.ordered ? 'ol' : 'ul', ordered: item.ordered, items: [] }
+        const block = item.ordered
+          ? { kind: 'ol', ordered: true, start: item.start, items: [] }
+          : { kind: 'ul', ordered: false, items: [] }
         container.push(block)
         const level = { indent: item.indent, ordered: item.ordered, items: block.items, container }
         lists.push(level)
@@ -1905,6 +1957,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       if (host === undefined) {
         level = open(blocks)
       } else if (item.indent > host.indent) {
+        if (lists.length >= MAX_LIST_DEPTH) {
+          const deepest = host.items[host.items.length - 1]
+          deepest.text = `${deepest.text}\n${item.text}`
+          return
+        }
         level = open(host.items[host.items.length - 1].children)
       } else if (host.ordered !== item.ordered) {
         lists.pop()
@@ -1950,19 +2007,36 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           continue
         }
 
+        const indent = line.length - line.trimStart().length
+
         const fence = fenceOpening(trimmed)
         if (fence !== null) {
           flushParagraph()
-          closeLists()
+          // A fence that is itself indented is a continuation of the block it is
+          // in, so its content loses that much indentation and keeps the rest.
+          const dedent = (text) => {
+            let cut = 0
+            while (cut < indent && text[cut] === ' ') cut += 1
+            return text.slice(cut)
+          }
           const body = []
           index += 1
           while (index < lines.length && !isFenceClose(lines[index].trim(), fence)) {
-            body.push(lines[index])
+            body.push(dedent(lines[index]))
             index += 1
           }
           // An unclosed fence still renders as code: that is what a streaming
           // answer looks like between the opening and closing ticks.
-          blocks.push({ kind: 'code', lang: fence.lang, text: body.join('\n') })
+          const block = { kind: 'code', lang: fence.lang, text: body.join('\n') }
+          // A fence indented under a list item is part of that item. Closing the
+          // list here would split one list into two and renumber the second half.
+          const openList = lists[lists.length - 1]
+          if (openList !== undefined && indent > openList.indent) {
+            openList.items[openList.items.length - 1].children.push(block)
+          } else {
+            closeLists()
+            blocks.push(block)
+          }
           continue
         }
 
@@ -1993,16 +2067,16 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         const marker = listMarkerOf(trimmed)
         if (marker !== null) {
           flushParagraph()
-          const indent = line.length - line.trimStart().length
-          pushListItem({ blocks, lists }, { ordered: marker.ordered, indent, text: marker.text })
+          pushListItem({ blocks, lists }, { ordered: marker.ordered, start: marker.start, indent, text: marker.text })
           continue
         }
 
-        // A deeper, unmarked line continues the item above it.
+        // A deeper, unmarked line continues the item above it. A `>` there is a
+        // lazy quote continuation, not the literal text `a > q`.
         const list = lists[lists.length - 1]
-        if (list !== undefined && line.length - line.trimStart().length > list.indent) {
+        if (list !== undefined && indent > list.indent) {
           const item = list.items[list.items.length - 1]
-          item.text = `${item.text}\n${trimmed}`
+          item.text = `${item.text}\n${trimmed.replace(/^>\s?/u, '')}`
           continue
         }
 
@@ -2036,10 +2110,15 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      */
     function plainList(block, depth) {
       const pad = '  '.repeat(depth)
+      const start = block.ordered === true ? (block.start ?? 1) : 1
       const lines = []
       block.items.forEach((item, index) => {
-        lines.push(`${pad}${block.ordered === true ? `${index + 1}. ` : '- '}${plainInline(item.text)}`)
-        for (const child of item.children) lines.push(plainList(child, depth + 1))
+        lines.push(`${pad}${block.ordered === true ? `${start + index}. ` : '- '}${plainInline(item.text)}`)
+        for (const child of item.children) {
+          // A fenced block inside an item is copied verbatim, indented under it.
+          if (child.kind === 'code') lines.push(...child.text.split('\n').map((line) => `${pad}  ${line}`))
+          else lines.push(plainList(child, depth + 1))
+        }
       })
       return lines.join('\n')
     }
@@ -2192,26 +2271,39 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      * Flatten one line into text, bold, code, link and strikethrough parts.
      *
      * Only the inline shapes an answer uses are recognised — `**bold**`,
-     * `` `code` ``, `[label](https://…)`, `~~strike~~`. A link is only a link
+     * `` `code` ``, `[label](https://…)`, `~~strike~~`, plus a backslash escape
+     * of ASCII punctuation (`\*` is a star, not emphasis). A link is only a link
      * when its target is http(s): any other scheme keeps its label as plain
      * text, so a model cannot smuggle `javascript:` into the page and the
      * reader never sees the raw brackets of a relative path either.
      *
+     * Every character class is bounded so one parse is linear in the line: the
+     * label stops at the next `[` and the target is capped, otherwise a line
+     * with many unmatched `[` makes the scan quadratic and a streaming answer
+     * re-scans the whole line every frame.
+     *
      * @param {string} text - answer text.
+     * @param {number} [depth] - nesting level; bold contents are re-parsed once.
      * @returns {Array<{ text: string, strong?: boolean, code?: boolean, href?: string, strike?: boolean }>} parts.
      */
-    function inlineParts(text) {
+    function inlineParts(text, depth = 0) {
       if (typeof text !== 'string' || text.length === 0) return []
       const parts = []
-      const pattern = /\*\*([\s\S]+?)\*\*|`([^`\n]+)`|(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(?<!!)\[([^\]\n]+)\]\([^)\s]*\)|~~([^~\n]+)~~/gu
+      const pattern = /\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])|\*\*([\s\S]+?)\*\*|`([^`\n]+)`|(?<!!)\[([^[\]\n]+)\]\(((?:https?):\/\/(?:[^()\s]|\([^()\s]*\)){0,2048})\)|(?<!!)\[([^[\]\n]+)\]\([^()\s]{0,2048}\)|~~([^~\n]+)~~/giu
       let last = 0
       for (const match of text.matchAll(pattern)) {
         if (match.index > last) parts.push({ text: text.slice(last, match.index) })
-        if (match[1] !== undefined) parts.push({ text: match[1], strong: true })
-        else if (match[2] !== undefined) parts.push({ text: match[2], code: true })
-        else if (match[3] !== undefined) parts.push({ text: match[3], href: match[4] })
-        else if (match[5] !== undefined) parts.push({ text: match[5] })
-        else parts.push({ text: match[6], strike: true })
+        if (match[1] !== undefined) parts.push({ text: match[1] })
+        else if (match[2] !== undefined) {
+          // `**`[文档](https://…)`**` and `**`y`**` are bold text with markup
+          // inside it. One extra pass keeps the bold run and lets the inner
+          // link or code become the node the reader expects.
+          if (depth > 0) parts.push({ text: match[0], strong: true })
+          else for (const inner of inlineParts(match[2], depth + 1)) parts.push({ ...inner, strong: true })
+        } else if (match[3] !== undefined) parts.push({ text: match[3], code: true })
+        else if (match[4] !== undefined) parts.push({ text: match[4], href: match[5] })
+        else if (match[6] !== undefined) parts.push({ text: match[6] })
+        else parts.push({ text: match[7], strike: true })
         last = match.index + match[0].length
       }
       if (last < text.length) parts.push({ text: text.slice(last) })
@@ -2236,71 +2328,102 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     function inlineView(text, prefix) {
       return inlineParts(text).map((part, index) => {
         const key = `${prefix}:${index}`
-        if (part.code === true) return h('code', { key }, part.text)
-        if (part.strong === true) return h('strong', { key }, part.text)
-        if (part.href !== undefined) {
-          return h('a', { key, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, part.text)
-        }
-        if (part.strike === true) return h('del', { key }, part.text)
-        return part.text
+        // A bold run may hold a link or code span; the inner node carries the
+        // markup and the bold wrapper stays on the outside.
+        let node = null
+        if (part.code === true) node = h('code', { key }, part.text)
+        else if (part.href !== undefined) {
+          node = h('a', { key, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, part.text)
+        } else if (part.strike === true) node = h('del', { key }, part.text)
+        if (node === null) return part.strong === true ? h('strong', { key }, part.text) : part.text
+        return part.strong === true ? h('strong', { key }, node) : node
       })
     }
 
     /**
+     * One fenced code block as nodes.
+     *
+     * A code block is a single text node on purpose: its content is literal, so
+     * no `**` inside it becomes bold and no long line is re-wrapped.
+     *
+     * @param {object} block - a `code` block.
+     * @param {string} key - key prefix.
+     * @returns {object} the code node.
+     */
+    function codeView(block, key) {
+      return h('div', { key, className: 'clipchat-card__code' },
+        block.lang.length > 0 ? h('span', { className: 'clipchat-card__lang' }, block.lang) : null,
+        h('pre', { className: 'clipchat-card__pre' }, h('code', null, block.text)))
+    }
+
+    /**
      * One list and its nested lists as nodes.
+     *
+     * An ordered list carries its first number so `3.` starts at three instead
+     * of being renumbered from one. A fenced block that belonged to an item is
+     * rendered inside its `li`, not as a sibling of the list.
+     *
      * @param {object} block - a `ul` or `ol` block.
      * @param {string} key - key prefix.
      * @returns {object} a list node.
      */
     function listView(block, key) {
-      return h(block.ordered === true ? 'ol' : 'ul', { key, className: 'clipchat-card__list' },
+      const props = { key, className: 'clipchat-card__list' }
+      if (block.ordered === true && block.start !== 1) props.start = block.start
+      return h(block.ordered === true ? 'ol' : 'ul', props,
         block.items.map((item, index) => h('li', { key: `${key}:${index}` },
           inlineView(item.text, `${key}:${index}`),
-          item.children.map((child, childIndex) => listView(child, `${key}:${index}:${childIndex}`)))))
+          item.children.map((child, childIndex) => (child.kind === 'code'
+            ? codeView(child, `${key}:${index}:${childIndex}`)
+            : listView(child, `${key}:${index}:${childIndex}`))))))
     }
 
     /**
      * Render one parsed answer as nodes.
      *
-     * A code block is a single text node on purpose: its content is literal, so
-     * no `**` inside it becomes bold and no long line is re-wrapped. A table
-     * gets a scroll container, because a grid wider than the card must not
-     * widen the card itself.
+     * A table gets a scroll container, because a grid wider than the card must
+     * not widen the card itself. The whole body is guarded: a throw here happens
+     * inside React's render and would take the answer area with it, so the raw
+     * text is a better failure than a blank card.
      *
      * @param {unknown} text - answer text.
+     * @param {(text: unknown) => Array<object>} [parse] - block parser; a test points it
+     *   at a throwing parser to exercise the fallback, which no real input reaches.
      * @returns {Array<object>} nodes.
      */
-    function answerView(text) {
-      return answerBlocks(text).map((block, index) => {
-        const key = `${index}:${block.kind}`
-        if (block.kind === 'h') {
-          return h(`h${block.level + 2}`, { key, className: 'clipchat-card__h' }, inlineView(block.text, key))
-        }
-        if (block.kind === 'code') {
-          return h('div', { key, className: 'clipchat-card__code' },
-            block.lang.length > 0 ? h('span', { className: 'clipchat-card__lang' }, block.lang) : null,
-            h('pre', { className: 'clipchat-card__pre' }, h('code', null, block.text)))
-        }
-        if (block.kind === 'table') {
-          const cellOf = (tag, text, column, rowKey) => h(tag, {
-            key: `${rowKey}:${column}`,
-            className: tag === 'th' ? 'clipchat-card__th' : 'clipchat-card__td',
-            style: block.align[column] === null ? undefined : { textAlign: block.align[column] },
-          }, inlineView(text, `${rowKey}:${column}`))
-          return h('div', { key, className: 'clipchat-card__tablewrap' },
-            h('table', { className: 'clipchat-card__table' },
-              h('thead', null, h('tr', null,
-                block.head.map((text, column) => cellOf('th', text, column, `${key}:head`)))),
-              h('tbody', null, block.rows.map((row, rowIndex) => h('tr', { key: rowIndex },
-                row.map((text, column) => cellOf('td', text, column, `${key}:${rowIndex}`)))))))
-        }
-        if (block.kind === 'hr') return h('hr', { key, className: 'clipchat-card__hr' })
-        if (block.kind === 'quote') {
-          return h('blockquote', { key, className: 'clipchat-card__quote' }, inlineView(block.text, key))
-        }
-        if (block.kind === 'ul' || block.kind === 'ol') return listView(block, key)
-        return h('p', { key, className: 'clipchat-card__p' }, inlineView(block.text, key))
-      })
+    function answerView(text, parse = answerBlocks) {
+      try {
+        return parse(text).map((block, index) => {
+          const key = `${index}:${block.kind}`
+          if (block.kind === 'h') {
+            return h(`h${block.level + 2}`, { key, className: 'clipchat-card__h' }, inlineView(block.text, key))
+          }
+          if (block.kind === 'code') return codeView(block, key)
+          if (block.kind === 'table') {
+            const cellOf = (tag, text, column, rowKey) => h(tag, {
+              key: `${rowKey}:${column}`,
+              className: tag === 'th' ? 'clipchat-card__th' : 'clipchat-card__td',
+              style: block.align[column] === null ? undefined : { textAlign: block.align[column] },
+            }, inlineView(text, `${rowKey}:${column}`))
+            return h('div', { key, className: 'clipchat-card__tablewrap' },
+              h('table', { className: 'clipchat-card__table' },
+                h('thead', null, h('tr', null,
+                  block.head.map((text, column) => cellOf('th', text, column, `${key}:head`)))),
+                h('tbody', null, block.rows.map((row, rowIndex) => h('tr', { key: rowIndex },
+                  row.map((text, column) => cellOf('td', text, column, `${key}:${rowIndex}`)))))))
+          }
+          if (block.kind === 'hr') return h('hr', { key, className: 'clipchat-card__hr' })
+          if (block.kind === 'quote') {
+            return h('blockquote', { key, className: 'clipchat-card__quote' }, inlineView(block.text, key))
+          }
+          if (block.kind === 'ul' || block.kind === 'ol') return listView(block, key)
+          return h('p', { key, className: 'clipchat-card__p' }, inlineView(block.text, key))
+        })
+      } catch {
+        // Last resort: the answer stays readable even when the renderer cannot
+        // parse it, which is what 0.1.2 did for every answer.
+        return [h('pre', { className: 'clipchat-card__pre' }, typeof text === 'string' ? text : '')]
+      }
     }
 
     /**

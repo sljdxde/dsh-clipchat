@@ -263,6 +263,9 @@ async function main() {
       const caseModule = await loadCase(options.caseId)
       const outcome = await caseModule.run({ page, paths, url: web.url, sessionId: seed.sessionId, log: say })
       assertions.push(...outcome.assertions)
+      // Files the case wrote (the Markdown screenshots) belong in `result.json`
+      // with every other artifact, or a green run leaves them unlisted on disk.
+      Object.assign(artifacts, outcome.artifacts ?? {})
       for (const assertion of assertions) {
         const timing = Number.isFinite(assertion.durationMs) ? ` (${assertion.durationMs}ms)` : ''
         say(`${assertion.passed ? 'PASS' : 'FAIL'} ${assertion.name}${timing} - ${assertion.detail}`)
@@ -281,6 +284,7 @@ async function main() {
         say(`WARN failure artifacts incomplete: ${archiveError?.message ?? archiveError}`)
       }
     }
+    if (error?.artifacts !== undefined && typeof error.artifacts === 'object') Object.assign(artifacts, error.artifacts)
     if (Array.isArray(error?.assertions)) assertions.push(...error.assertions)
     else {
       assertions.push({

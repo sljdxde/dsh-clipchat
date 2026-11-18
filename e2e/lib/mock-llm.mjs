@@ -21,13 +21,15 @@ export const ANSWER_PREFIX = 'E2E_MOCK_ANSWER'
  * Every run therefore drives the answer renderer with the shapes that used to
  * come out as raw characters: a table with an aligned column, a fenced code
  * block and a nested list. The first line stays a plain paragraph so the
- * streaming assertions still have something unambiguous to wait for.
+ * streaming assertions still have something unambiguous to wait for. One cell
+ * carries a Windows path on purpose: a table cell that drops the backslash of
+ * `C:\Users\me` is the escape bug this fixture keeps an eye on.
  */
 export const ANSWER_BLOCKS = [
   '| 档位 | 携带 | 成本 |',
   '| --- | --- | ---: |',
   '| 默认 | 选段 + 整条消息 | 2-6k |',
-  '| 详细 | 会话分层摘要 | 20-30k |',
+  '| 详细 | 会话分层摘要 C:\\Users\\me | 20-30k |',
   '',
   '```js',
   'const plan = { tier: "default", tokens: 2600 }',

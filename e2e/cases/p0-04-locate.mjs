@@ -367,18 +367,24 @@ async function measureCentred(page, highlightId) {
  * @param {string} context.url - authenticated Web URL.
  * @param {string} context.sessionId - fixture session id.
  * @param {(line: string) => void} context.log - line sink.
- * @returns {Promise<{assertions: object[]}>} recorded assertions.
+ * @returns {Promise<{assertions: object[], artifacts: Record<string, string>}>} recorded assertions and the files this case wrote.
  */
 export async function run({ page, url, sessionId, log, paths }) {
   const assertions = []
+  // Files the case produces, handed back so `run.mjs` can register them in
+  // `result.json` next to every other artifact instead of leaving them on disk
+  // unlisted.
+  const artifacts = {}
   try {
-    return await runSteps({ page, url, sessionId, log, assertions, artifactsDir: paths?.artifactsDir })
+    await runSteps({ page, url, sessionId, log, assertions, artifactsDir: paths?.artifactsDir, artifacts })
+    return { assertions, artifacts }
   } catch (error) {
     if (!assertions.some((assertion) => assertion.passed === false)) {
       assertions.push({ name: 'case-error', passed: false, detail: `${error?.name ?? 'Error'}: ${error?.message ?? error}` })
     }
     const wrapped = new Error(error?.message ?? String(error))
     wrapped.assertions = assertions
+    wrapped.artifacts = artifacts
     throw wrapped
   }
 }
@@ -389,7 +395,7 @@ export async function run({ page, url, sessionId, log, paths }) {
  * @param {object} context - runner context plus the accumulator.
  * @returns {Promise<{assertions: object[]}>} recorded assertions.
  */
-async function runSteps({ page, url, sessionId, log, assertions, artifactsDir }) {
+async function runSteps({ page, url, sessionId, log, assertions, artifactsDir, artifacts }) {
   await page.setViewport(VIEWPORT)
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   let highlightId = null
@@ -449,6 +455,8 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir })
         head: answer.querySelectorAll('table thead th').length,
         rows: answer.querySelectorAll('table tbody tr').length,
         firstCell: answer.querySelector('table tbody td')?.textContent ?? null,
+        // Second body row, second column: the cell that carries the path.
+        pathCell: answer.querySelectorAll('table tbody td')[4]?.textContent ?? null,
         aligned: answer.querySelectorAll('table thead th')[2]?.style.textAlign ?? null,
         code: answer.querySelector('pre code')?.textContent ?? null,
         lang: answer.querySelector('.clipchat-card__lang')?.textContent ?? null,
@@ -461,6 +469,11 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir })
     if (shape.missing !== undefined) throw new Error(shape.missing)
     if (shape.head !== 3 || shape.rows !== 2) throw new Error(`table shape is wrong: ${JSON.stringify(shape)}`)
     if (shape.firstCell !== '默认') throw new Error(`table body is not the mock answer: ${JSON.stringify(shape.firstCell)}`)
+    // The cell with a Windows path: a backslash before a letter is not an
+    // escape, so it must survive into the grid exactly as the model wrote it.
+    if (shape.pathCell !== '会话分层摘要 C:\\Users\\me') {
+      throw new Error(`the table dropped a backslash: ${JSON.stringify(shape.pathCell)}`)
+    }
     if (shape.aligned !== 'right') throw new Error(`the column alignment was dropped: ${JSON.stringify(shape.aligned)}`)
     if (shape.code !== 'const plan = { tier: "default", tokens: 2600 }') {
       throw new Error(`the code block text is wrong: ${JSON.stringify(shape.code)}`)
@@ -471,18 +484,22 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir })
     if (shape.scrolls === false) throw new Error('the table is wider than its scroll box')
 
     // Two shots: the grid and the code block cannot both be inside a card that
-    // scrolls, and either one alone would understate the fix.
+    // scrolls, and either one alone would understate the fix. Each file is also
+    // registered under its own key so `result.json` lists what the run wrote.
     const shots = []
-    for (const [name, selector] of [['table', '.clipchat-card__tablewrap'], ['code', '.clipchat-card__code']]) {
+    for (const [key, name, selector] of [
+      ['markdownTableScreenshot', 'p0-04-markdown-table.png', '.clipchat-card__tablewrap'],
+      ['markdownCodeScreenshot', 'p0-04-markdown-code.png', '.clipchat-card__code'],
+    ]) {
       await page.evaluate((css) => {
         document.querySelector(css)?.scrollIntoView({ block: 'center' })
       }, selector)
       await sleep(200)
       const card = await page.$('.clipchat-card')
       if (card === null) throw new Error('the card closed before it could be photographed')
-      const file = join(artifactsDir ?? '.', `p0-04-markdown-${name}.png`)
-      await card.screenshot({ path: file })
-      shots.push(file.slice(file.lastIndexOf('/') + 1))
+      await card.screenshot({ path: join(artifactsDir ?? '.', name) })
+      shots.push(name)
+      artifacts[key] = name
     }
     return `table 3×2, aligned column, js code block, nested item; shots ${shots.join(', ')}`
   })
