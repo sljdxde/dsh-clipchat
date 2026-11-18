@@ -1136,6 +1136,40 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     }
 
     /**
+     * Scroll the turn rail so the mark for `turn` is rendered.
+     *
+     * The rail virtualises its own marks: a turn far from the rail's current
+     * offset has no button in the DOM at all, so `navigateToTurn` cannot see
+     * the control it is supposed to click. Walking upwards to the rail's
+     * scroll container and deriving the fixed pitch from one rendered mark
+     * keeps this independent of the host's generated class names.
+     *
+     * @param {number} turn - turn whose mark should be rendered.
+     * @returns {boolean} whether the rail was scrolled or the mark already exists.
+     */
+    function scrollRailToTurn(turn) {
+      if (typeof document === 'undefined' || !Number.isInteger(turn) || turn < 1) return false
+      const marks = [...document.querySelectorAll('button[data-index][aria-label*="轮"]')]
+      if (marks.length === 0) return false
+      const wanted = `第 ${turn} 轮`
+      if (marks.some((mark) => (mark.getAttribute('aria-label') ?? '').includes(wanted))) return true
+      const anchor = marks[0]
+      let scroller = anchor.parentElement
+      while (scroller !== null) {
+        const style = getComputedStyle(scroller)
+        if ((style.overflowY === 'auto' || style.overflowY === 'scroll')
+          && scroller.scrollHeight > scroller.clientHeight) break
+        scroller = scroller.parentElement
+      }
+      if (scroller === null) return false
+      const index = Number.parseInt(anchor.getAttribute('data-index') ?? '', 10)
+      const offset = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
+      const pitch = Number.isInteger(index) && index > 0 && offset > 0 ? offset / index : 10
+      scroller.scrollTop = Math.max(0, (turn - 1) * pitch - scroller.clientHeight / 2)
+      return true
+    }
+
+    /**
      * How far to scroll so one line sits in the middle of the column.
      * @param {Element} line - the underline.
      * @param {Element} scroller - the conversation column.
@@ -1303,19 +1337,30 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         ?? (Number.isInteger(turn) ? turn : null)
         ?? turnOfText(anchor.text)
       const used = navigateToTurn(target)
-      if (used === null) {
+      // No jump control means the rail's own virtualisation hid the mark; rolling
+      // the rail first is the only way to get one, so only fall back to a plain
+      // DOM scroll when there is no rail to roll.
+      if (used === null && !scrollRailToTurn(target)) {
         const node = nodesFor(anchor.nodeKey)[0]
         if (node === undefined || typeof node.scrollIntoView !== 'function') return false
         node.scrollIntoView({ block: 'center' })
       }
 
       // The host scrolls (and may mount the turn) asynchronously; wait for the
-      // underline to be laid out before centring and flashing it.
-      const deadline = Date.now() + (used === 'load' ? 6000 : 3000)
+      // underline to be laid out before centring and flashing it. An unmounted
+      // turn needs the rail rolled and its "load and jump" mark clicked first,
+      // so that path gets the longer deadline.
+      const deadline = Date.now() + (used === 'jump' ? 3000 : 6000)
+      let railClicked = false
       const tick = () => {
         const lines = linesOf()
         const laid = lines.some((line) => line.getBoundingClientRect().height > 0)
         if (!laid && Date.now() < deadline) {
+          if (used === null && !railClicked && scrollRailToTurn(target)) {
+            // One click only: the mark leaves the DOM once the host starts
+            // loading, and clicking every tick would cancel that load.
+            if (navigateToTurn(target) !== null) railClicked = true
+          }
           setTimeout(tick, 100)
           return
         }
@@ -3132,6 +3177,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         turnOfNode,
         turnOfText,
         navigateToTurn,
+        scrollRailToTurn,
         holdCentred,
         nodesFor,
         blocksOf,

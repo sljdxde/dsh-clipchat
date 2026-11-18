@@ -25,6 +25,14 @@
 
 ## 安装
 
+### 从 npm 安装（推荐）
+
+```sh
+dsh plugin --profile web add dsh-clipchat
+```
+
+装完刷新页面。`client.js` 改动刷新即生效；`index.js` 与 `lib/` 改动需要禁用/启用该插件（或重启 dsh）才会重新注册路由。
+
 ### 从本地目录安装（开发期）
 
 1. 确认检出路径里没有空格。若路径含空格（DSH 的安装器会裁掉尾部空格），先建一个干净软链：
@@ -133,6 +141,59 @@ npm run coverage   # 只跑覆盖率报告
 客户端测试跑在真实 DOM（jsdom）+ 真实 React 上：`test/helpers/dom.mjs` 装环境，`test/helpers/mount.mjs` 真正挂载组件。这样「组件渲染时抛错」这类问题会被测到——只检查返回的元素树是看不到的。`load-client.mjs` 用 `vm` 以固定文件名加载 `client.js`，既让每次加载有独立模块状态，又不会把覆盖率拆成多份。
 
 覆盖：路由注册与销毁、守卫、模型解析、上下文拼装与截断、SSE 帧与中断、存储 schema/上限/TTL/孤儿清理/并发写、锚点重锚、搜索与截断、卡片挂载与交互（提问、流式、复制、记录增删、模型菜单、详情条、跨会话搜索）、高亮 overlay 绘制与点击定位。
+
+## 如何跑 E2E
+
+`npm run e2e` 用本机真实的 DSH Web + 系统 Chrome 跑 P0-4：聊天历史滚动到第 36-60 轮后，从记录面板点「定位」，第 10 轮必须被挂载、下划线居中、卡片关闭。
+
+前置条件：
+
+- Node.js >= 20.12（E2E 夹具用到 `readdir` 的 `recursive`/`parentPath`；插件本身仍只要求 >= 20）。
+- 本机已安装 DSH `0.2.2-rc.3` 同系列，且为 hoisted 布局（`~/.dsh/runtime/node_modules/@deepseek-ai/{dsh-base,dsh-web-app,dsh-headless}` 可读）。
+- 已安装 Chrome 或 Chromium（不会自动下载）。
+- 首次需要 `npm install` 安装 `puppeteer-core`（仅开发依赖，需网络）。
+
+```sh
+npm run e2e                 # 完整跑一遍
+npm run e2e -- --headed     # 看得到浏览器窗口
+npm run e2e -- --keep       # 保留临时 DSH_HOME 供排查
+npm run e2e -- --case p0-04 # 指定用例（目前只有 p0-04）
+node e2e/run.mjs --prepare-only   # 只准备临时 home/profile/mock/60 轮夹具，不启动 Web
+node e2e/run.mjs --browser-smoke  # prepare 后启动 Chrome、截 about:blank，不跑用例
+```
+
+`--prepare-only` 与 `--browser-smoke` 也会写最小 `result.json`，并和其它运行一样清理临时目录（用 `--keep`/`E2E_KEEP_TMP=1` 可保留）。
+
+环境变量：
+
+| 变量 | 作用 |
+|---|---|
+| `DSH_BIN` | 覆盖 DSH 启动器路径（默认 `~/.dsh/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js`） |
+| `E2E_CHROME_PATH` | 覆盖 Chrome/Chromium 可执行文件 |
+| `E2E_KEEP_TMP=1` | 保留 `$TMPDIR/dsh-clipchat-e2e/<run-id>/` |
+| `E2E_KEEP_LOGS=1` | 成功时也保留 `browser.log` 与 `fixture.log`（默认成功只保留 `result.json`、`web.log`、`mock-llm.log`） |
+| `E2E_HEADED=1` | 同 `--headed` |
+
+每次运行使用新的 `runId`、临时 `DSH_HOME`、空闲端口和 mock 模型，产物在 `artifacts/e2e/<run-id>/`：
+
+| 文件 | 内容 | 何时保留 |
+|---|---|---|
+| `result.json` | 用例、断言明细与耗时、环境版本、产物路径 | 每次 |
+| `env.json` | Node / DSH / Chrome / puppeteer-core 版本 | 每次 |
+| `web.log` | DSH Web 的标准输出与错误（`token=***` 已脱敏） | 启动 Web 的运行 |
+| `mock-llm.log` | 本地 mock 模型的请求摘要 | 每次 |
+| `pids.json` | Web 子进程 pid；mock 是进程内服务，标为 `in-process` | 启动 Web 的运行 |
+| `fixture.log` | headless 生成、60 轮改写、投影缓存清理记录 | 失败时，或 `E2E_KEEP_LOGS=1` |
+| `browser.log` | 页面 console、pageerror、requestfailed | 失败时，或 `E2E_KEEP_LOGS=1` |
+| `failure-p0-04.png` | 失败时的全页截图 | 失败时 |
+| `failure-p0-04.html` | 失败瞬间的 DOM | 失败时 |
+| `browser-smoke.png` | `--browser-smoke` 的 about:blank 截图 | 仅该模式 |
+
+`--prepare-only` 默认保留 `result.json`、`env.json`、`mock-llm.log`（不启动 Web，所以没有 `web.log`；`fixture.log` 仅失败或 `E2E_KEEP_LOGS=1` 时保留）；`--browser-smoke` 另加 `browser-smoke.png`，同样不启动 Web。
+
+失败排查顺序：先看 `result.json` 里哪条断言失败，再对照 `failure-p0-04.png`/`failure-p0-04.html`；启动问题看 `web.log`，模型请求看 `mock-llm.log`。退出码：`0` 全通过，`1` 断言失败，`2` 环境或前置失败。
+
+已知限制：只支持 macOS/Linux + Chromium/Chrome；只支持 hoisted 的 DSH 安装；不接 CI；E2E 夹具的事件形状绑定当前 DSH v4，升级后会在 header/事件校验处 fail fast；定位依赖宿主 rail 的虚拟化结构，插件会先把 rail 滚到目标轮再点「加载并跳转」，DSH 改版若移除该结构，`result.json` 会记录 pitch 与已渲染按钮，可用宿主「加载更早」手工复现。
 
 ## 已知限制
 

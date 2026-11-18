@@ -1,8 +1,8 @@
 {
   "name": "dsh-clipchat",
-  "version": "0.0.1",
-  "private": true,
+  "version": "0.1.0",
   "description": "Select a passage in a reply, ask about it in place, keep asking, and mark what matters.",
+  "license": "MIT",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -37,7 +37,8 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check.mjs",
-    "coverage": "node --experimental-test-coverage --test test/*.test.mjs"
+    "coverage": "node --experimental-test-coverage --test test/*.test.mjs",
+    "e2e": "node e2e/run.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -55,6 +56,7 @@
   ],
   "devDependencies": {
     "jsdom": "^31.0.1",
+    "puppeteer-core": "^25",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   }

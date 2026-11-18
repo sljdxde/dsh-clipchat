@@ -275,8 +275,8 @@ test('revealHighlight reports failure when the passage never lays out', async (t
     let failed = false
     // No underline is ever rendered, so the deadline is reached.
     assert.equal(t_.revealHighlight(id, 7, () => { failed = true }), true)
-    // The poll re-arms itself every 100ms, so advance in steps.
-    for (let step = 0; step < 40 && !failed; step += 1) t.mock.timers.tick(100)
+    // The poll re-arms itself every 100ms; the unmounted path now waits 6s.
+    for (let step = 0; step < 80 && !failed; step += 1) t.mock.timers.tick(100)
     assert.equal(failed, true, 'onFail ran once the deadline passed')
     t.mock.timers.reset()
   })

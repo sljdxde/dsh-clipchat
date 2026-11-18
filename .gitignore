@@ -4,3 +4,8 @@ node_modules/
 
 # Local planning artifacts (wayfinder map, tickets, prototypes, research, archive).
 .scratch/
+
+# LoopForge Local: 项目内技能安装与交付产物
+.dsh/skills/
+.devflow/
+artifacts/
