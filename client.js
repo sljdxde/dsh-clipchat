@@ -3241,12 +3241,20 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const bodyStyleRef = React.useRef(null)
 
       /** Measure the card and the limits it must respect right now. */
-      const frameOf = () => {
+      /** The card's rect with the current offset taken back out, without measuring limits. */
+      const rectOf = () => {
         const card = cardRef.current
         if (card === null || card === undefined || typeof card.getBoundingClientRect !== 'function') return null
         const rect = card.getBoundingClientRect()
         if (rect.width <= 0 || rect.height <= 0) return null
-        return { rect: cardFrameOf(rect, boxRef.current), limits: cardLimits(viewportOf(), clipRectOf(card), cardRoomOf(card)) }
+        return cardFrameOf(rect, boxRef.current)
+      }
+
+      const frameOf = () => {
+        const card = cardRef.current
+        const rect = rectOf()
+        if (rect === null) return null
+        return { rect, limits: cardLimits(viewportOf(), clipRectOf(card), cardRoomOf(card)) }
       }
 
       /** Paint one box onto the card without a React render. */
@@ -3266,14 +3274,17 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       }
 
       /** Paint one box and hand it back to React. */
-      const commitBox = (next) => {
-        // Only a gesture or Home comes through here, so the size is the user's:
-        // it is what a later window fit has to give back. A viewport fit paints
-        // without committing, which is why a clamp never becomes the card's own
-        // size.
-        chosenRef.current = { w: next.w, h: next.h }
+      /**
+       * Paint a box, and record the size the user asked for as theirs.
+       * @param {object} next - what goes on screen, possibly clamped by the window.
+       * @param {object} [chosen] - what the user asked for. A gesture that does not
+       *   change the size passes the size already held, so a width the window
+       *   clamped is never mistaken for a choice; a resize or Home passes its own.
+       */
+      const commitBox = (next, chosen = next) => {
+        chosenRef.current = { w: chosen.w, h: chosen.h }
         paintBox(next)
-        rememberBox(sessionId, next)
+        rememberBox(sessionId, { w: chosen.w, h: chosen.h })
         setBox(next)
       }
 
@@ -3302,19 +3313,24 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
        * size is. Painting a clamp instead of committing one is what lets the card
        * come back when the window widens again.
        * @param {boolean} place - also bring the offset back inside (needs a placed card).
-       * @param {boolean} [trusted] - false bounds the fit by the window alone, for the pass that
-       *   answers a resize before the host has finished re-laying its column out.
+       * @param {boolean} [trusted] - false bounds the fit by the window and the composer,
+       *   for the pass that answers a resize before the host has finished re-laying
+       *   its column out: a column caught mid-layout can read narrower than the
+       *   window, and that reading must not reach the screen even for a frame.
+       * @param {object|null} [measured] - a frame the caller already measured.
        */
-      const applyFit = (place, trusted = true) => {
+      const applyFit = (place, trusted = true, measured = null) => {
         // A live gesture owns the geometry: a fit landing mid-drag would yank the
         // card out from under the pointer.
         if (gestureRef.current !== null) return
-        const frame = frameOf()
-        // An untrusted pass asks only what the window can hold: a column caught
-        // mid-layout can read narrower than the window, and that reading must not
-        // reach the screen even for a frame.
+        // An untrusted pass needs the card's place but not its limits: measuring
+        // the column costs a scan of every message node, and the result is the
+        // one thing that pass must not use. The composer's top is still honoured,
+        // so the answering frame cannot sit under the pinned bar.
+        const frame = measured ?? (trusted ? frameOf() : null)
+        const rect = frame === null ? rectOf() : frame.rect
         const limits = !trusted
-          ? cardLimits(viewportOf(), null, null)
+          ? cardLimits(viewportOf(), null, { bottom: pinnedTopOf(cardRef.current) })
           : (frame === null ? cardLimits(viewportOf(), clipRectOf(cardRef.current), cardRoomOf(cardRef.current)) : frame.limits)
         setMaxWidth(Math.round(limits.maxW))
         const chosen = chosenRef.current
@@ -3326,8 +3342,8 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
         // A rect still at the origin has not been placed by the host yet; its
         // numbers say nothing about where the card will end up.
-        const placed = frame !== null && (frame.rect.left !== 0 || frame.rect.top !== 0)
-        const next = place && placed ? fitBox(sized, frame.rect, limits) : sized
+        const placed = rect !== null && (rect.left !== 0 || rect.top !== 0)
+        const next = place && placed ? fitBox(sized, rect, limits) : sized
         if (next.w === current.w && next.h === current.h && next.dx === current.dx && next.dy === current.dy) return
         paintBox(next)
         setBox(next)
@@ -3366,7 +3382,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           if (signature !== null && signature === previous) still += 1
           else still = 0
           previous = signature
-          applyFit(true)
+          applyFit(true, true, frame)
           frames += 1
           if (still >= CARD_FIT_STABLE_FRAMES || frames >= CARD_FIT_MAX_FRAMES) return
           raf(step)
@@ -3456,11 +3472,14 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           paintBox(gesture.box)
           return
         }
-        commitBox(boxRef.current)
+        // A move leaves the size alone: the width on screen may be one the
+        // window clamped, and recording it would throw the user's own size away.
+        if (gesture.kind === 'move') commitBox(boxRef.current, chosenRef.current)
+        else commitBox(boxRef.current)
         const frame = frameOf()
         if (frame === null) return
         const uncovered = revealTitleBar(cardRef.current, boxRef.current, frame.rect, frame.limits)
-        if (uncovered.dy !== boxRef.current.dy) commitBox(uncovered)
+        if (uncovered.dy !== boxRef.current.dy) commitBox(uncovered, chosenRef.current)
       }
 
       /** Home: back to the default size at the anchor. */
@@ -3471,7 +3490,9 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         // Home means "back to the default size at the anchor", but a narrow
         // window can leave the host's anchor too close to an edge: fit the card
         // back inside rather than let its right edge leave the screen.
-        commitBox(frame === null ? home : fitBox(home, frame.rect, limits))
+        // Home asks for the default size even when the window cannot show it: the
+        // painted width is fitted, but the wish is the default.
+        commitBox(frame === null ? home : fitBox(home, frame.rect, limits), { w: CARD_DEFAULT_W, h: null })
         setSettling(true)
         if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return
         clearTimeout(settleTimerRef.current)
@@ -3513,7 +3534,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           return
         }
         const size = event.shiftKey === true ? CARD_KEY_MOVE_LARGE : CARD_KEY_MOVE
-        commitBox(dragBox(boxRef.current, { x: direction.x * size, y: direction.y * size }, frame.rect, frame.limits))
+        commitBox(dragBox(boxRef.current, { x: direction.x * size, y: direction.y * size }, frame.rect, frame.limits), chosenRef.current)
       }
 
       // The opening animation runs once, as the card appears. Its class is

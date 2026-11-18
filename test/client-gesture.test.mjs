@@ -501,6 +501,62 @@ test('a clamped card gets its own width back when the window widens again', asyn
   }, { clip: false })
 })
 
+test('moving a card in a narrow window keeps the size the user chose', async () => {
+  await withCard(async ({ card, container, window }) => {
+    // 600 → 616 in a wide window.
+    const bar = container.querySelector('.clipchat-card__bar')
+    await act(async () => {
+      for (const _ of [0, 1]) {
+        bar.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+      }
+    })
+    assert.equal(card.style.width, '616px')
+
+    // Narrow: the card is fitted, which is not the same as being resized.
+    Object.defineProperty(window, 'innerWidth', { value: 420, configurable: true })
+    await act(async () => { window.dispatchEvent(new window.Event('resize')) })
+    await flush(40)
+    assert.equal(card.style.width, '404px', 'fitted to the narrow window')
+
+    // Move it, twice: an arrow key, then a real drag of the title bar. A move
+    // does not pick a size, so neither may record the clamped width as the
+    // user's choice.
+    await act(async () => {
+      bar.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    })
+    assert.equal(card.style.width, '404px', 'the arrow moves the card, not its size')
+    await down(bar, 200, 120)
+    await move(210, 130)
+    await up(210, 130)
+    assert.equal(card.style.width, '404px', 'the drag moves the card, not its size')
+
+    // Widen: the size the user chose comes back, after two moves at 404.
+    Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true })
+    await act(async () => { window.dispatchEvent(new window.Event('resize')) })
+    await flush(40)
+    assert.equal(card.style.width, '616px', 'the move did not throw the user size away')
+  }, { clip: false })
+})
+
+test('Home in a narrow window still asks for the default size', async () => {
+  await withCard(async ({ card, container, window }) => {
+    Object.defineProperty(window, 'innerWidth', { value: 420, configurable: true })
+    await act(async () => { window.dispatchEvent(new window.Event('resize')) })
+    await flush(40)
+    await act(async () => {
+      container.querySelector('.clipchat-card__bar').dispatchEvent(
+        new window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
+      )
+    })
+    await flush(40)
+    assert.equal(card.style.width, '404px', 'Home is fitted to the narrow window')
+    Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true })
+    await act(async () => { window.dispatchEvent(new window.Event('resize')) })
+    await flush(40)
+    assert.equal(card.style.width, '600px', 'the default size is what Home asked for')
+  }, { clip: false })
+})
+
 test('a pinned height hands the space to the footer', async () => {
   await withCard(async ({ card, container }) => {
     const bar = container.querySelector('.clipchat-card__bar')
