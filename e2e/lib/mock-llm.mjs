@@ -63,9 +63,11 @@ function lastUserText(messages) {
  * Start the mock provider.
  * @param {object} options - server options.
  * @param {(line: string) => Promise<void>|void} options.log - one-line request log.
+ * @param {(prompt: string) => string} [options.answer] - optional deterministic
+ *   reply builder; the demo uses it, the E2E keeps the marker reply.
  * @returns {Promise<{baseUrl: string, port: number, close: () => Promise<void>}>} running mock.
  */
-export async function startMockLlm({ log }) {
+export async function startMockLlm({ log, answer: answerOf }) {
   const server = createServer((request, response) => {
     void (async () => {
       const started = Date.now()
@@ -97,9 +99,11 @@ export async function startMockLlm({ log }) {
         const model = typeof payload.model === 'string' ? payload.model : 'mock-answer'
         const messages = Array.isArray(payload.messages) ? payload.messages : []
         const prompt = lastUserText(messages)
-        const answer = prompt.includes(SEED_MARKER)
-          ? `${SEED_ANSWER}: fixture seed answer.`
-          : `${ANSWER_PREFIX}: ${prompt.slice(0, 80)}`
+        const answer = typeof answerOf === 'function'
+          ? answerOf(prompt)
+          : prompt.includes(SEED_MARKER)
+            ? `${SEED_ANSWER}: fixture seed answer.`
+            : `${ANSWER_PREFIX}: ${prompt.slice(0, 80)}`
         await log(
           `${method} ${path} 200 ${Date.now() - started}ms model=${model} `
           + `prompt=${prompt.replace(/\s+/gu, ' ').slice(0, 120)}`,

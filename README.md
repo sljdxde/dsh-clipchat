@@ -1,6 +1,15 @@
 # dsh-clipchat
 
+[![npm](https://img.shields.io/npm/v/dsh-clipchat.svg)](https://www.npmjs.com/package/dsh-clipchat)
+[![license](https://img.shields.io/npm/l/dsh-clipchat.svg)](LICENSE)
+
 在 DSH 的回复里划词就地提问：选中一段文字，浮层出现「引用文本 / 问这段」，点开卡片就能追问，答案不出现在主线消息流里，重点还能像划线一样留在原文上。
+
+![划词追问、记录与定位演示](https://raw.githubusercontent.com/sljdxde/dsh-clipchat/main/docs/demo.gif)
+
+```sh
+dsh plugin --profile web add dsh-clipchat
+```
 
 ## 功能
 
