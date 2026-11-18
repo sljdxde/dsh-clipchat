@@ -473,6 +473,34 @@ test('Home fits the card back inside a narrow window', async () => {
   }, { clip: false })
 })
 
+test('a clamped card gets its own width back when the window widens again', async () => {
+  await withCard(async ({ card, container, window }) => {
+    // The user gives the card a size of its own in a wide window: 600 → 616.
+    const bar = container.querySelector('.clipchat-card__bar')
+    await act(async () => {
+      for (const _ of [0, 1]) {
+        bar.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+      }
+    })
+    assert.equal(card.style.width, '616px', 'the card has a size of its own')
+
+    // Narrow the window. The card has to fit what is left, but the size it was
+    // given is not the window's to overwrite: a committed clamp could never be
+    // undone, which is how a card came back 85px wide on a 420px window.
+    Object.defineProperty(window, 'innerWidth', { value: 420, configurable: true })
+    await act(async () => { window.dispatchEvent(new window.Event('resize')) })
+    await flush(40)
+    assert.equal(card.style.width, '404px', 'the card is fitted to the narrow window')
+    assert.equal(Number.parseFloat(card.style.width), 420 - 16, 'and it takes the whole width that is left')
+
+    // Widen it again: the card comes back by itself, at the size it was given.
+    Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true })
+    await act(async () => { window.dispatchEvent(new window.Event('resize')) })
+    await flush(40)
+    assert.equal(card.style.width, '616px', 'the size the user chose is back without a gesture')
+  }, { clip: false })
+})
+
 test('a pinned height hands the space to the footer', async () => {
   await withCard(async ({ card, container }) => {
     const bar = container.querySelector('.clipchat-card__bar')

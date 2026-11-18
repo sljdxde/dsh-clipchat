@@ -35,6 +35,16 @@ window.__ModuleLoader__.load({
     const CARD_CLICK_MS = 200
     /** How long the card's opening animation gets before its class is dropped. */
     const CARD_POP_MS = 200
+    /**
+     * A window change is fitted over several frames, not once: the host re-lays
+     * its column out after the window resized and re-anchors the card a beat
+     * later, and a fit that lands mid-flight measures a column narrower than the
+     * window (measured: an 85px card in a 420px window). The fit keeps watching
+     * the card until it has held still for a few frames, and gives up after
+     * `CARD_FIT_MAX_FRAMES` whatever happens.
+     */
+    const CARD_FIT_MAX_FRAMES = 90
+    const CARD_FIT_STABLE_FRAMES = 6
     /** One arrow key moves 8px, or 40px with Shift. */
     const CARD_KEY_MOVE = 8
     const CARD_KEY_MOVE_LARGE = 40
@@ -3213,6 +3223,14 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       // every frame of a drag.
       const [box, setBox] = React.useState(() => rememberedBox(sessionId))
       const boxRef = React.useRef(box)
+      /**
+       * The size the user chose, which a viewport fit must never overwrite: a
+       * clamp the window imposed lasts as long as the window does, and widening
+       * it again gives the card its own size back.
+       */
+      const chosenRef = React.useRef({ w: box.w, h: box.h })
+      /** Bumped on every window change and on unmount, so a stale fit loop stops. */
+      const fitLoopRef = React.useRef(0)
       const gestureRef = React.useRef(null)
       const [gestureKind, setGestureKind] = React.useState(null)
       const [settling, setSettling] = React.useState(false)
@@ -3249,6 +3267,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 
       /** Paint one box and hand it back to React. */
       const commitBox = (next) => {
+        // Only a gesture or Home comes through here, so the size is the user's:
+        // it is what a later window fit has to give back. A viewport fit paints
+        // without committing, which is why a clamp never becomes the card's own
+        // size.
+        chosenRef.current = { w: next.w, h: next.h }
         paintBox(next)
         rememberBox(sessionId, next)
         setBox(next)
@@ -3271,6 +3294,84 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         if (saved === null) return
         document.body.style.cursor = saved.cursor
         document.body.style.userSelect = saved.userSelect
+      }
+
+      /**
+       * Fit the card to the room the window leaves, keeping the size the user
+       * chose: the fit decides what is on screen and where, not what the card's
+       * size is. Painting a clamp instead of committing one is what lets the card
+       * come back when the window widens again.
+       * @param {boolean} place - also bring the offset back inside (needs a placed card).
+       * @param {boolean} [trusted] - false bounds the fit by the window alone, for the pass that
+       *   answers a resize before the host has finished re-laying its column out.
+       */
+      const applyFit = (place, trusted = true) => {
+        // A live gesture owns the geometry: a fit landing mid-drag would yank the
+        // card out from under the pointer.
+        if (gestureRef.current !== null) return
+        const frame = frameOf()
+        // An untrusted pass asks only what the window can hold: a column caught
+        // mid-layout can read narrower than the window, and that reading must not
+        // reach the screen even for a frame.
+        const limits = !trusted
+          ? cardLimits(viewportOf(), null, null)
+          : (frame === null ? cardLimits(viewportOf(), clipRectOf(cardRef.current), cardRoomOf(cardRef.current)) : frame.limits)
+        setMaxWidth(Math.round(limits.maxW))
+        const chosen = chosenRef.current
+        const current = boxRef.current
+        const sized = {
+          ...current,
+          w: chosen.w === null || chosen.w === undefined ? null : Math.min(chosen.w, Math.round(limits.maxW)),
+          h: chosen.h === null || chosen.h === undefined ? null : Math.min(chosen.h, Math.round(limits.maxH)),
+        }
+        // A rect still at the origin has not been placed by the host yet; its
+        // numbers say nothing about where the card will end up.
+        const placed = frame !== null && (frame.rect.left !== 0 || frame.rect.top !== 0)
+        const next = place && placed ? fitBox(sized, frame.rect, limits) : sized
+        if (next.w === current.w && next.h === current.h && next.dx === current.dx && next.dy === current.dy) return
+        paintBox(next)
+        setBox(next)
+        // The remembered size stays the user's, so reopening in a narrow window
+        // does not turn a clamp into the card's own size.
+        rememberBox(sessionId, { w: chosen.w, h: chosen.h })
+      }
+
+      /**
+       * The window changed size: keep fitting the card into the room it leaves
+       * until the card holds still. One pass is not enough — the host re-lays
+       * its column out and re-anchors the card a beat after the window, so the
+       * last word has to be a fitting pass, not a re-anchor that left the card
+       * half off the screen.
+       */
+      const fitAfterLayoutChange = () => {
+        // Answer at once, bounded by the window only: the card must not hang off
+        // the edge for a frame, and a column caught mid-layout must not decide
+        // the card's size.
+        applyFit(true, false)
+        const raf = typeof window === 'undefined' ? null : window.requestAnimationFrame?.bind(window) ?? null
+        if (raf === null) return
+        fitLoopRef.current += 1
+        const generation = fitLoopRef.current
+        let previous = null
+        let still = 0
+        let frames = 0
+        const step = () => {
+          if (fitLoopRef.current !== generation) return
+          const frame = frameOf()
+          // Where the card actually sits and how much room it has: both move
+          // while the host is re-laying out, and both decide what "settled" is.
+          const signature = frame === null
+            ? null
+            : `${Math.round(frame.rect.left)}:${Math.round(frame.rect.top)}:${Math.round(frame.limits.maxW)}`
+          if (signature !== null && signature === previous) still += 1
+          else still = 0
+          previous = signature
+          applyFit(true)
+          frames += 1
+          if (still >= CARD_FIT_STABLE_FRAMES || frames >= CARD_FIT_MAX_FRAMES) return
+          raf(step)
+        }
+        raf(step)
       }
 
       /** Start a move (`kind` = 'move') or a resize along `dir`. */
@@ -3444,57 +3545,27 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
       }, [gestureKind])
 
-      // The window changed size: shrink and move the card back inside what is
-      // left of its container instead of letting it hang off the edge.
+      // The window changed size: pull the card back inside what is left of its
+      // container instead of letting it hang off the edge — without letting a
+      // half-laid-out measurement decide the card's size for good.
       React.useEffect(() => {
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
-        const onResize = () => {
-          const apply = () => {
-            if (gestureRef.current !== null) return
-            const frame = frameOf()
-            if (frame === null) return
-            setMaxWidth(Math.round(frame.limits.maxW))
-            commitBox(fitBox(boxRef.current, frame.rect, frame.limits))
-          }
-          apply()
-          // The host re-lays its column out after the window changed and
-          // re-anchors the card a beat later: fit once more on the next frame,
-          // or the card stays where the old anchor left it and hangs off-screen.
-          if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(apply)
+        window.addEventListener('resize', fitAfterLayoutChange)
+        return () => {
+          window.removeEventListener('resize', fitAfterLayoutChange)
+          fitLoopRef.current += 1
         }
-        window.addEventListener('resize', onResize)
-        return () => window.removeEventListener('resize', onResize)
       }, [])
 
       // Fit the card into this window on mount, and once more on the next
       // frame: the host anchors the card after our first render, and a card
-      // reopened in a narrow window would otherwise keep the size it was given
-      // while sitting at an anchor its right edge cannot reach.
+      // reopened in a narrow window would otherwise sit at an anchor its right
+      // edge cannot reach. The first pass places nothing: before the host has
+      // put the card anywhere, its rect is not a place worth correcting.
       React.useEffect(() => {
-        const card = cardRef.current
-        if (card === null || card === undefined) return
-        const apply = (withPlace) => {
-          // A live gesture owns the geometry: a fit landing mid-drag would
-          // yank the card out from under the pointer.
-          if (gestureRef.current !== null) return
-          const measured = frameOf()
-          const limits = measured === null ? cardLimits(viewportOf(), clipRectOf(card), cardRoomOf(card)) : measured.limits
-          setMaxWidth(Math.round(limits.maxW))
-          const current = boxRef.current
-          const width = current.w === null || current.w === undefined ? null : Math.min(current.w, Math.round(limits.maxW))
-          const height = current.h === null || current.h === undefined ? null : Math.min(current.h, Math.round(limits.maxH))
-          const sized = { ...current, w: width, h: height }
-          // A rect still at the origin has not been placed by the host yet; its
-          // numbers say nothing about where the card will end up.
-          const placed = measured !== null && (measured.rect.left !== 0 || measured.rect.top !== 0)
-          const next = !withPlace || !placed ? sized : fitBox(sized, measured.rect, limits)
-          if (next.w !== current.w || next.h !== current.h || next.dx !== current.dx || next.dy !== current.dy) commitBox(next)
-        }
-        // The first pass only trims the size: before the host has put the card
-        // anywhere, its rect is not a place worth correcting. The next frame
-        // does place too, once the host's own layout has landed.
-        apply(false)
-        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => apply(true))
+        if (cardRef.current === null || cardRef.current === undefined) return
+        applyFit(false)
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => applyFit(true))
       }, [])
 
       // One unconditional hook per snapshot slice; the fallback keeps the call
@@ -3535,6 +3606,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         unlockBody()
         if (settleTimerRef.current !== null) clearTimeout(settleTimerRef.current)
         settleTimerRef.current = null
+        fitLoopRef.current += 1
       }, [])
 
       // Clear the per-turn “copied” label after a moment.
