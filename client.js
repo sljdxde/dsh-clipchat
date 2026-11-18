@@ -270,6 +270,8 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card__table tbody tr:last-child>*{border-bottom:none}
 .clipchat-card__th{font-weight:600;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08))}
 .clipchat-card__hr{margin:12px 0 0;border:none;border-top:1px solid var(--dsw-alias-border-l2,var(--dsw-alias-border-l3))}
+.clipchat-card__img{display:block;max-width:100%;height:auto;margin:8px 0 0;border-radius:8px;border:1px solid var(--dsw-alias-border-l3)}
+.clipchat-card__check{display:inline-block;color:var(--dsw-alias-label-secondary,#666)}
 .clipchat-card__a a{color:var(--dsw-alias-brand-primary,#2f6fed);text-decoration:none}
 .clipchat-card__a a:hover{text-decoration:underline}
 .clipchat-card__a>:first-child{margin-top:0}
@@ -2048,6 +2050,18 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           continue
         }
 
+        // A paragraph underlined with `===` or `---` is a setext heading
+        // (GFM): models write `标题` and then `===` instead of `# 标题`, and the
+        // reader used to see the underline as a rule and the text as prose.
+        const underline = paragraph.length > 0 ? /^(=+|-{2,})\s*$/u.exec(trimmed) : null
+        if (underline !== null) {
+          const text = paragraph.join(' ')
+          paragraph = []
+          closeLists()
+          blocks.push({ kind: 'h', level: underline[1][0] === '=' ? 1 : 2, text })
+          continue
+        }
+
         const table = tableAt(lines, index)
         if (table !== null) {
           flushParagraph()
@@ -2080,15 +2094,17 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           continue
         }
 
-        const quote = /^>\s?(.*)$/u.exec(trimmed)
+        const quote = /^(?:>\s?)+(.*)$/u.exec(trimmed)
         if (quote !== null) {
           flushParagraph()
           closeLists()
-          // Consecutive quote lines are one quotation, not one box each.
+          // Consecutive quote lines are one quotation, not one box each. A `>>`
+          // nested quote stays one quotation: the card has one quote style, and
+          // leaving the inner `>` in the text made the reader see a raw marker.
           const quoted = [quote[1]]
           while (index + 1 < lines.length && /^>\s?/u.test(lines[index + 1].trim())) {
             index += 1
-            quoted.push(lines[index].trim().replace(/^>\s?/u, ''))
+            quoted.push(lines[index].trim().replace(/^(?:>\s?)+/u, ''))
           }
           blocks.push({ kind: 'quote', text: quoted.join('\n') })
           continue
@@ -2113,7 +2129,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const start = block.ordered === true ? (block.start ?? 1) : 1
       const lines = []
       block.items.forEach((item, index) => {
-        lines.push(`${pad}${block.ordered === true ? `${start + index}. ` : '- '}${plainInline(item.text)}`)
+        const task = taskOf(item.text)
+        const body = task === null
+          ? plainInline(item.text)
+          : `${task.checked ? '☑' : '☐'} ${plainInline(task.text)}`
+        lines.push(`${pad}${block.ordered === true ? `${start + index}. ` : '- '}${body}`)
         for (const child of item.children) {
           // A fenced block inside an item is copied verbatim, indented under it.
           if (child.kind === 'code') lines.push(...child.text.split('\n').map((line) => `${pad}  ${line}`))
@@ -2268,46 +2288,79 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     }
 
     /**
-     * Flatten one line into text, bold, code, link and strikethrough parts.
+     * One run of inline Markdown, as a single alternation of named groups.
      *
-     * Only the inline shapes an answer uses are recognised — `**bold**`,
-     * `` `code` ``, `[label](https://…)`, `~~strike~~`, plus a backslash escape
-     * of ASCII punctuation (`\*` is a star, not emphasis). A link is only a link
-     * when its target is http(s): any other scheme keeps its label as plain
-     * text, so a model cannot smuggle `javascript:` into the page and the
-     * reader never sees the raw brackets of a relative path either.
+     * The shapes an answer actually uses: backslash escapes, bold (`**`/`__`),
+     * bold-italic (`***`), italic (`*`/`_`), code spans (one or two backticks so
+     * ``a`b`` keeps its tick), images, links (http(s) only, optional title),
+     * autolinks and strikethrough. Anything unrecognised stays literal text.
      *
-     * Every character class is bounded so one parse is linear in the line: the
-     * label stops at the next `[` and the target is capped, otherwise a line
-     * with many unmatched `[` makes the scan quadratic and a streaming answer
-     * re-scans the whole line every frame.
+     * Every run is bounded and no branch may start on the delimiter it just
+     * consumed, so a line of 100k unmatched `*` or `[` stays linear: the scan
+     * cannot walk to the end of the line from each position and back.
+     */
+    const INLINE_PATTERN = /\\(?<esc>[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])|(?<!\*)\*\*\*(?!\*)(?<bolditalic>[^*\n]{1,512}?)\*\*\*(?!\*)|(?<!\*)\*\*(?!\*)(?<strong>[^*\n][\s\S]{0,4095}?)\*\*(?!\*)|(?<![\w_])__(?![\s_])(?<strongunderscore>[^_\n]{1,512}?)(?<=\S)__(?![\w_])|(?<!\*)\*(?=\S)(?<italic>(?:[^*\n]|\*\*[^*\n]{1,256}\*\*){1,512}?)(?<=\S)\*(?!\*)|(?<![\w_])_(?![\s_])(?<underscore>[^_\n]{1,512}?)(?<=\S)_(?![\w_])|!\[(?<alt>[^[\]\n]{0,512})\]\((?<imgsrc>https?:\/\/(?:[^()\s]|\([^()\s]*\)){0,2048})(?:\s+"[^"\n]{0,256}")?\)|``(?<codeblock>[^`\n]{0,512}(?:`[^`\n]{1,512})*?)``|(?<!`)`(?<code>[^`\n]{1,2048})`(?!`)|(?<!!)\[(?<label>[^[\]\n]{1,1024})\]\((?<href>https?:\/\/(?:[^()\s]|\([^()\s]*\)){0,2048})(?:\s+"[^"\n]{0,256}")?\)|(?<!!)\[(?<plain>[^[\]\n]{1,1024})\]\([^()\s]{0,2048}\)|<(?<auto>https?:\/\/[^<>\s]{1,2048})>|~~(?<strike>[^~\n]{1,2048})~~/giu
+
+    /**
+     * Flatten one line into text, bold, italic, code, link, image and strike parts.
+     *
+     * Each part carries the plain text the reader and the clipboard both see,
+     * plus the flags the renderer needs (`strong`, `em`, `code`, `href`,
+     * `strike`, `image`). A link is only a link when its target is http(s): any
+     * other scheme keeps its label as plain text, so a model cannot smuggle
+     * `javascript:` into the page and the reader never sees the raw brackets of
+     * a relative path either. An image is only an image when its source is
+     * http(s); a local path keeps its raw text.
      *
      * @param {string} text - answer text.
-     * @param {number} [depth] - nesting level; bold contents are re-parsed once.
-     * @returns {Array<{ text: string, strong?: boolean, code?: boolean, href?: string, strike?: boolean }>} parts.
+     * @param {number} [depth] - nesting level; a bold or italic run re-parses its contents once.
+     * @returns {Array<{ text: string, strong?: boolean, em?: boolean, code?: boolean, href?: string, strike?: boolean, image?: boolean }>} parts.
      */
     function inlineParts(text, depth = 0) {
       if (typeof text !== 'string' || text.length === 0) return []
       const parts = []
-      const pattern = /\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])|\*\*([\s\S]+?)\*\*|`([^`\n]+)`|(?<!!)\[([^[\]\n]+)\]\(((?:https?):\/\/(?:[^()\s]|\([^()\s]*\)){0,2048})\)|(?<!!)\[([^[\]\n]+)\]\([^()\s]{0,2048}\)|~~([^~\n]+)~~/giu
+      const nest = (inner, flags) => {
+        // `**`[文档](https://…)`**`, `**`y`**` and `*带 **粗** 的字*` are runs
+        // with markup inside them. One extra pass keeps the wrapper and lets the
+        // inner link, code span or bold become the node the reader expects; the
+        // inner runs ride along as `children` so one wrapper stays one element.
+        parts.push({
+          children: depth > 0 ? [{ text: inner }] : inlineParts(inner, depth + 1),
+          ...flags,
+        })
+      }
       let last = 0
-      for (const match of text.matchAll(pattern)) {
+      for (const match of text.matchAll(INLINE_PATTERN)) {
         if (match.index > last) parts.push({ text: text.slice(last, match.index) })
-        if (match[1] !== undefined) parts.push({ text: match[1] })
-        else if (match[2] !== undefined) {
-          // `**`[文档](https://…)`**` and `**`y`**` are bold text with markup
-          // inside it. One extra pass keeps the bold run and lets the inner
-          // link or code become the node the reader expects.
-          if (depth > 0) parts.push({ text: match[0], strong: true })
-          else for (const inner of inlineParts(match[2], depth + 1)) parts.push({ ...inner, strong: true })
-        } else if (match[3] !== undefined) parts.push({ text: match[3], code: true })
-        else if (match[4] !== undefined) parts.push({ text: match[4], href: match[5] })
-        else if (match[6] !== undefined) parts.push({ text: match[6] })
-        else parts.push({ text: match[7], strike: true })
+        const groups = match.groups ?? {}
+        if (groups.esc !== undefined) parts.push({ text: groups.esc })
+        else if (groups.bolditalic !== undefined) nest(groups.bolditalic, { strong: true, em: true })
+        else if (groups.strong !== undefined) nest(groups.strong, { strong: true })
+        else if (groups.strongunderscore !== undefined) nest(groups.strongunderscore, { strong: true })
+        else if (groups.italic !== undefined) nest(groups.italic, { em: true })
+        else if (groups.underscore !== undefined) nest(groups.underscore, { em: true })
+        else if (groups.code !== undefined || groups.codeblock !== undefined) {
+          parts.push({ text: groups.code ?? groups.codeblock, code: true })
+        } else if (groups.alt !== undefined) parts.push({ text: groups.alt, href: groups.imgsrc, image: true })
+        else if (groups.label !== undefined) parts.push({ text: groups.label, href: groups.href })
+        else if (groups.plain !== undefined) parts.push({ text: groups.plain })
+        else if (groups.auto !== undefined) parts.push({ text: groups.auto, href: groups.auto })
+        else if (groups.strike !== undefined) parts.push({ text: groups.strike, strike: true })
+        else parts.push({ text: match[0] })
         last = match.index + match[0].length
       }
       if (last < text.length) parts.push({ text: text.slice(last) })
       return parts
+    }
+
+    /**
+     * The text a part shows, wrapper or not.
+     * @param {{ text?: string, children?: Array<object> }} part - one inline part.
+     * @returns {string} its text.
+     */
+    function partText(part) {
+      if (part.children === undefined) return part.text
+      return part.children.map(partText).join('')
     }
 
     /**
@@ -2316,27 +2369,55 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      * @returns {string} plain text.
      */
     function plainInline(text) {
-      return inlineParts(text).map((part) => part.text).join('')
+      return inlineParts(text).map(partText).join('')
     }
 
     /**
      * One line of answer text as inline nodes.
+     *
+     * A bold or italic run may hold a link, an image or a code span; the inner
+     * node carries the markup and the wrappers stay on the outside. Emphasis is
+     * a real `<em>` so the browser's own italic face and a screen reader's
+     * emphasis both apply, and an image is a real `<img>`: `loading="lazy"` and
+     * `max-width` keep a tall screenshot from pushing the card's controls away.
+     *
      * @param {string} text - answer text.
      * @param {string} prefix - key prefix of the block that holds it.
      * @returns {Array<object|string>} nodes.
      */
     function inlineView(text, prefix) {
-      return inlineParts(text).map((part, index) => {
+      return viewParts(inlineParts(text), prefix)
+    }
+
+    /**
+     * Inline parts as nodes, one wrapper per part.
+     * @param {Array<object>} parts - parsed inline parts.
+     * @param {string} prefix - key prefix of the block that holds them.
+     * @returns {Array<object|string>} nodes.
+     */
+    function viewParts(parts, prefix) {
+      return parts.map((part, index) => {
         const key = `${prefix}:${index}`
-        // A bold run may hold a link or code span; the inner node carries the
-        // markup and the bold wrapper stays on the outside.
         let node = null
-        if (part.code === true) node = h('code', { key }, part.text)
-        else if (part.href !== undefined) {
-          node = h('a', { key, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, part.text)
-        } else if (part.strike === true) node = h('del', { key }, part.text)
-        if (node === null) return part.strong === true ? h('strong', { key }, part.text) : part.text
-        return part.strong === true ? h('strong', { key }, node) : node
+        if (part.code === true) node = h('code', { key }, partText(part))
+        else if (part.image === true) {
+          node = h('img', {
+            key,
+            className: 'clipchat-card__img',
+            src: part.href,
+            alt: partText(part),
+            loading: 'lazy',
+            decoding: 'async',
+          })
+        } else if (part.href !== undefined) {
+          node = h('a', { key, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, partText(part))
+        } else if (part.strike === true) node = h('del', { key }, partText(part))
+        if (node === null) node = part.children === undefined ? part.text : viewParts(part.children, key)
+        const wrappers = []
+        if (part.strong === true) wrappers.push('strong')
+        if (part.em === true) wrappers.push('em')
+        for (const tag of wrappers.reverse()) node = h(tag, { key }, ...(Array.isArray(node) ? node : [node]))
+        return node
       })
     }
 
@@ -2357,6 +2438,21 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     }
 
     /**
+     * A task-list marker at the start of a list item.
+     *
+     * `- [ ] 待办` and `- [x] 已办` are GitHub task lists: the reader gets a
+     * checkbox glyph and the marker stays out of the sentence.
+     *
+     * @param {string} text - one item's text.
+     * @returns {{ checked: boolean, text: string } | null} the marker, or null when the item is not a task.
+     */
+    function taskOf(text) {
+      const match = /^\[([ xX])\](?:\s+|$)([\s\S]*)$/u.exec(text)
+      if (match === null) return null
+      return { checked: match[1] !== ' ', text: match[2] }
+    }
+
+    /**
      * One list and its nested lists as nodes.
      *
      * An ordered list carries its first number so `3.` starts at three instead
@@ -2371,11 +2467,17 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const props = { key, className: 'clipchat-card__list' }
       if (block.ordered === true && block.start !== 1) props.start = block.start
       return h(block.ordered === true ? 'ol' : 'ul', props,
-        block.items.map((item, index) => h('li', { key: `${key}:${index}` },
-          inlineView(item.text, `${key}:${index}`),
-          item.children.map((child, childIndex) => (child.kind === 'code'
-            ? codeView(child, `${key}:${index}:${childIndex}`)
-            : listView(child, `${key}:${index}:${childIndex}`))))))
+        block.items.map((item, index) => {
+          const task = taskOf(item.text)
+          return h('li', { key: `${key}:${index}` },
+            task === null
+              ? null
+              : h('span', { key: `${key}:${index}:check`, className: 'clipchat-card__check' }, task.checked ? '☑ ' : '☐ '),
+            inlineView(task === null ? item.text : task.text, `${key}:${index}`),
+            item.children.map((child, childIndex) => (child.kind === 'code'
+              ? codeView(child, `${key}:${index}:${childIndex}`)
+              : listView(child, `${key}:${index}:${childIndex}`))))
+        }))
     }
 
     /**

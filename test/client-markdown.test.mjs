@@ -338,7 +338,7 @@ test('inline markup covers bold, code, http links, bare labels and strikethrough
   assert.deepEqual(
     t.inlineParts('**b** `c` [l](https://x.y/z) [raw](javascript:1) ~~s~~ 尾巴'),
     [
-      { text: 'b', strong: true },
+      { children: [{ text: 'b' }], strong: true },
       { text: ' ' },
       { text: 'c', code: true },
       { text: ' ' },
@@ -350,8 +350,10 @@ test('inline markup covers bold, code, http links, bare labels and strikethrough
       { text: ' 尾巴' },
     ],
   )
-  // An image is not supported, so its syntax stays literal instead of becoming a link.
-  assert.deepEqual(t.inlineParts('![图](https://x.y/i.png)'), [{ text: '![图](https://x.y/i.png)' }])
+  // An http(s) image is an image; a local path has nothing the card can show and
+  // stays literal instead of turning into a broken link.
+  assert.deepEqual(t.inlineParts('![图](https://x.y/i.png)'), [{ text: '图', href: 'https://x.y/i.png', image: true }])
+  assert.deepEqual(t.inlineParts('![图](./i.png)'), [{ text: '![图](./i.png)' }])
   assert.deepEqual(t.inlineParts(''), [])
   assert.deepEqual(t.inlineParts(null), [])
 })
@@ -395,6 +397,70 @@ test('a bold run keeps the markup inside it instead of printing Markdown', async
   }
   assert.equal(t.answerPlain('**[文档](https://a.b)**'), '文档')
   assert.equal(t.answerPlain('**`y`**'), 'y')
+})
+
+test('italic runs render as emphasis, including the ones nested in bold', async () => {
+  const t = await helpers()
+  const nodes = t.answerView('这是 *斜体* 和 _也是斜体_。')
+  assert.deepEqual(tagsOf(nodes), ['p', 'em', 'em'])
+  assert.equal(textOf(nodes), '这是 斜体 和 也是斜体。')
+
+  // `*` inside a bold run, and bold inside an italic run, each keep one wrapper.
+  const nested = t.answerView('**带 *斜体* 的粗体**')
+  assert.deepEqual(tagsOf(nested), ['p', 'strong', 'em'])
+  assert.equal(textOf(nested), '带 斜体 的粗体')
+  const reverse = t.answerView('*带 **粗体** 的斜体*')
+  assert.deepEqual(tagsOf(reverse), ['p', 'em', 'strong'])
+  assert.equal(textOf(reverse), '带 粗体 的斜体')
+
+  // `***x***` is both at once.
+  const both = t.answerView('***粗斜***')
+  assert.deepEqual(tagsOf(both), ['p', 'strong', 'em'])
+  assert.equal(textOf(both), '粗斜')
+
+  // An underscore inside a word is part of the name, not emphasis.
+  assert.equal(textOf(t.answerView('snake_case_name 与 file_name.js')), 'snake_case_name 与 file_name.js')
+  // An escaped underscore is a character: it neither opens nor closes emphasis.
+  assert.equal(textOf(t.answerView('a\\_b\\_c 和 \\*星\\*')), 'a_b_c 和 *星*')
+})
+
+test('an image becomes an img, and its alt text is what the clipboard gets', async () => {
+  const t = await helpers()
+  const nodes = t.answerView('看图：![分布图](https://e.com/a.png) 完毕')
+  assert.deepEqual(tagsOf(nodes), ['p', 'img'])
+  const image = nodesOf(nodes, 'img')[0].args[1]
+  assert.equal(image.src, 'https://e.com/a.png')
+  assert.equal(image.alt, '分布图')
+  assert.equal(image.loading, 'lazy')
+  assert.equal(t.answerPlain('看图：![分布图](https://e.com/a.png) 完毕'), '看图：分布图 完毕')
+  // A non-http source never reaches the DOM as an image.
+  assert.deepEqual(tagsOf(t.answerView('![本地](./a.png)')), ['p'])
+})
+
+test('task list items carry a checkbox, in the card and in the copy', async () => {
+  const t = await helpers()
+  const nodes = t.answerView('- [ ] 未完成\n- [x] 已完成')
+  assert.deepEqual(tagsOf(nodes), ['ul', 'li', 'span', 'li', 'span'])
+  assert.deepEqual(nodesOf(nodes, 'span').map((node) => node.args.slice(2)), [['☐ '], ['☑ ']])
+  assert.equal(textOf(nodes), '☐ 未完成☑ 已完成')
+  assert.equal(t.answerPlain('- [ ] 未完成\n- [x] 已完成'), '- ☐ 未完成\n- ☑ 已完成')
+})
+
+test('code spans, link titles, autolinks and setext headings are read the way Markdown writes them', async () => {
+  const t = await helpers()
+  // A span fenced with two backticks keeps the single tick inside it.
+  const ticks = t.inlineParts('``a`b``')
+  assert.deepEqual(ticks, [{ text: 'a`b', code: true }])
+  // The optional link title is not part of the label, and a bare URL in angle
+  // brackets is already a link.
+  assert.deepEqual(t.inlineParts('[文档](https://e.com "标题")'), [{ text: '文档', href: 'https://e.com' }])
+  assert.deepEqual(t.inlineParts('<https://e.com>'), [{ text: 'https://e.com', href: 'https://e.com' }])
+  // `标题` over `===` is a first-level heading, over `---` a second.
+  const nodes = t.answerView('标题一\n===\n\n标题二\n---')
+  assert.deepEqual(tagsOf(nodes), ['h3', 'h4'])
+  assert.deepEqual(nodes.map((node) => textOf(node)), ['标题一', '标题二'])
+  // A nested quote is one quotation, not a line starting with `>`.
+  assert.equal(textOf(t.answerView('> 第一层\n>> 第二层')), '第一层\n第二层')
 })
 
 /* --- rendered tree */

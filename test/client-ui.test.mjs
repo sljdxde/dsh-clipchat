@@ -31,7 +31,7 @@ test('inlineParts keeps bold and code but leaves everything else literal', async
   const plugin = definition.factory(() => makeReact())
   assert.deepEqual(plugin.__test.inlineParts('a **b** `c` <d>'), [
     { text: 'a ' },
-    { text: 'b', strong: true },
+    { children: [{ text: 'b' }], strong: true },
     { text: ' ' },
     { text: 'c', code: true },
     { text: ' <d>' },
