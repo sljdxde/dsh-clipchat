@@ -56,7 +56,12 @@ const ANSWER = [
   '',
   '> 「纯」指每台机器上的副本都是独立的，不是同一份的别名。',
   '',
-  '参考 [RocksDB 的 placement 文档](https://github.com/facebook/rocksdb)，~~旧方案已废弃~~。',
+  '参考 [RocksDB 的 placement 文档](https://github.com/facebook/rocksdb "RocksDB")，~~旧方案已废弃~~。',
+  '',
+  '注意：*这里只是斜体*，_这里也是斜体_，`**这里不是加粗**` 是行内代码，自动链接 <https://rocksdb.org>。',
+  '',
+  '- [x] 主副本已定位',
+  '- [ ] 从副本还没轮转',
 ].join('\n')
 
 /**

@@ -461,8 +461,13 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir, a
         code: answer.querySelector('pre code')?.textContent ?? null,
         lang: answer.querySelector('.clipchat-card__lang')?.textContent ?? null,
         nested: answer.querySelector('.clipchat-card__list li .clipchat-card__list li')?.textContent ?? null,
+        emphasis: answer.querySelector('p em')?.textContent ?? null,
+        checks: [...answer.querySelectorAll('.clipchat-card__check')].map((node) => node.textContent),
+        links: [...answer.querySelectorAll('a')].map((node) => [node.textContent, node.getAttribute('href')]),
         rawPipes: text.includes('|---'),
         rawFence: text.includes('```'),
+        rawTask: text.includes('[x]') || text.includes('[ ]'),
+        rawEmphasis: /(?<!\*)\*[^*\n]+\*(?!\*)/u.test(text),
         scrolls: wrap === null ? null : wrap.scrollWidth <= wrap.clientWidth + 1,
       }
     })
@@ -480,6 +485,24 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir, a
     }
     if (shape.lang !== 'js') throw new Error(`the code language label is missing: ${JSON.stringify(shape.lang)}`)
     if (shape.nested !== '再从最近一轮往前加') throw new Error(`the nested list item is missing: ${JSON.stringify(shape.nested)}`)
+    if (shape.emphasis !== '这一句只是斜体') {
+      throw new Error(`the italic run is not emphasis: ${JSON.stringify(shape.emphasis)}`)
+    }
+    if (shape.rawEmphasis) throw new Error(`raw asterisks are still printed: ${JSON.stringify(shape)}`)
+    if (JSON.stringify(shape.checks) !== JSON.stringify(['☑ ', '☐ '])) {
+      throw new Error(`task items did not become checkboxes: ${JSON.stringify(shape.checks)}`)
+    }
+    if (shape.rawTask) throw new Error('a task marker is still printed as text')
+    const titled = (shape.links ?? []).find((link) => link[0] === 'RocksDB 文档')
+    if (titled === undefined || titled[1] !== 'https://github.com/facebook/rocksdb') {
+      throw new Error(`a titled link lost its label or target: ${JSON.stringify(shape.links)}`)
+    }
+    if (!(shape.links ?? []).some((link) => link[1] === 'https://rocksdb.org')) {
+      throw new Error(`an autolink did not become a link: ${JSON.stringify(shape.links)}`)
+    }
+    if ((shape.links ?? []).some((link) => link[0].includes('"RocksDB"'))) {
+      throw new Error('the link title leaked into the label')
+    }
     if (shape.rawPipes || shape.rawFence) throw new Error(`raw Markdown is still printed: ${JSON.stringify(shape)}`)
     if (shape.scrolls === false) throw new Error('the table is wider than its scroll box')
 
@@ -490,6 +513,7 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir, a
     for (const [key, name, selector] of [
       ['markdownTableScreenshot', 'p0-04-markdown-table.png', '.clipchat-card__tablewrap'],
       ['markdownCodeScreenshot', 'p0-04-markdown-code.png', '.clipchat-card__code'],
+      ['markdownInlineScreenshot', 'p0-04-markdown-inline.png', '.clipchat-card__check'],
     ]) {
       await page.evaluate((css) => {
         document.querySelector(css)?.scrollIntoView({ block: 'center' })
@@ -501,7 +525,7 @@ async function runSteps({ page, url, sessionId, log, assertions, artifactsDir, a
       shots.push(name)
       artifacts[key] = name
     }
-    return `table 3×2, aligned column, js code block, nested item; shots ${shots.join(', ')}`
+    return `table 3×2, aligned column, js code block, nested item, italic, titled link, autolink, task list; shots ${shots.join(', ')}`
   })
 
   // The reported failure lived here: the second question carries the first

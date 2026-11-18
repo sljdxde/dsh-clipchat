@@ -20,7 +20,7 @@ export const ANSWER_PREFIX = 'E2E_MOCK_ANSWER'
  *
  * Every run therefore drives the answer renderer with the shapes that used to
  * come out as raw characters: a table with an aligned column, a fenced code
- * block and a nested list. The first line stays a plain paragraph so the
+ * block, a nested list, italics, a titled link, an autolink and a task list. The first line stays a plain paragraph so the
  * streaming assertions still have something unambiguous to wait for. One cell
  * carries a Windows path on purpose: a table cell that drops the backslash of
  * `C:\Users\me` is the escape bug this fixture keeps an eye on.
@@ -38,6 +38,11 @@ export const ANSWER_BLOCKS = [
   '1. 先保留选段',
   '   - 再从最近一轮往前加',
   '2. 超上限才从最旧的删',
+  '',
+  '强调：*这一句只是斜体*，链接见 [RocksDB 文档](https://github.com/facebook/rocksdb "RocksDB") 与 <https://rocksdb.org>。',
+  '',
+  '- [x] 主副本定位',
+  '- [ ] 从副本轮转',
 ].join('\n')
 
 /**
