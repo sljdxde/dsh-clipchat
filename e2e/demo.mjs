@@ -375,7 +375,7 @@ async function main() {
   const docs = join(REPO_ROOT, 'docs')
   await mkdir(docs, { recursive: true })
   const gif = join(docs, 'demo.gif')
-  const poster = join(docs, 'demo.png')
+  const poster = join(docs, 'screenshot-card.png')
   const convert = spawnSync('ffmpeg', [
     '-y', '-i', webm,
     '-vf', 'fps=12,scale=1000:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer',
