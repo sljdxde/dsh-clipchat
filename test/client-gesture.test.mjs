@@ -362,6 +362,44 @@ test('keyboard shortcuts ignore the composer and unhandled keys', async () => {
   })
 })
 
+test('the focused resize grip answers the same keys as the title bar', async () => {
+  await withCard(async ({ card, container }) => {
+    const grip = container.querySelector('.clipchat-card__grip--se')
+    grip.focus()
+    assert.equal(container.ownerDocument.activeElement, grip, 'the grip is a real tab stop')
+    const press = async (init) => {
+      let event = null
+      await act(async () => {
+        event = new globalThis.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+        grip.dispatchEvent(event)
+      })
+      return event
+    }
+    const arrow = await press({ key: 'ArrowRight' })
+    assert.equal(arrow.defaultPrevented, true, 'the page does not scroll instead')
+    assert.deepEqual(offsetOf(card), { x: 8, y: 0 }, 'an arrow key moves the card from the grip')
+    await press({ key: 'ArrowRight', altKey: true })
+    assert.equal(card.style.width, '608px', 'Alt+arrow resizes it from the grip')
+    await press({ key: 'Home' })
+    assert.equal(card.style.width, '600px', 'Home resets it from the grip')
+    assert.deepEqual(offsetOf(card), { x: 0, y: 0 })
+  })
+})
+
+test('the east resize rail leaves the answer scrollbar its own pixels', async () => {
+  const rail = CLIENT_SOURCE.match(/\.clipchat-card__grip--e\{([^}]*)\}/)
+  assert.ok(rail, 'the east rail rule is still there')
+  const railWidth = Number(/width:(\d+)px/.exec(rail[1])[1])
+  const thread = CLIENT_SOURCE.match(/\.clipchat-card__thread\{([^}]*)\}/)
+  assert.ok(thread, 'the thread rule is still there')
+  const inset = Number(/margin-right:(\d+)px/.exec(thread[1])?.[1] ?? 0)
+  assert.ok(inset >= railWidth,
+    `the thread is inset ${inset}px, at least the ${railWidth}px rail, so its scrollbar lands left of the rail`)
+  const padding = /padding:(\d+)px (\d+)px (\d+)px (\d+)px/.exec(thread[1])
+  assert.equal(Number(padding[2]) + inset, Number(padding[4]),
+    'the inset comes out of the right padding, so the text keeps the gap it has on the left and the records panel still lines up')
+})
+
 test('a card that cannot be measured ignores keyboard geometry', async () => {
   await withCard(async ({ card, container }) => {
     card.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0 })

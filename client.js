@@ -305,7 +305,13 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card__preset{border:1px solid var(--dsw-alias-border-l3);background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 68%,transparent);color:var(--dsw-alias-label-secondary,#666);border-radius:999px;padding:4px 11px;font:var(--dsw-font-xs-13);line-height:1.4;cursor:pointer;box-shadow:0 1px 1.5px rgba(0,0,0,.04);transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease,box-shadow .12s ease}
 .clipchat-card__preset:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover);transform:translateY(-1px)}
 .clipchat-card__preset:disabled{opacity:.5;cursor:default}
-.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:12px 16px 12px}
+/* The east resize rail owns the card's right-hand 10px, and the answer's
+   scrollbar sits at the thread's right edge — underneath the rail, where a
+   press meant for the scrollbar resized the card instead. Insetting the thread
+   by the rail's width puts the scrollbar to the left of it. The 10px taken off
+   the right padding gives the inset back, so the text keeps its 16px gap to the
+   card's edge — the same gap the records panel has when it replaces the thread. */
+.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:12px 6px 12px 16px;margin-right:10px}
 /* A card whose height the user pinned gives space to the footer first: the
    thread keeps at least a line, then scrolls, instead of pushing the footer out. */
 .clipchat-card.is-sized .clipchat-card__thread{min-height:0}
@@ -3327,10 +3333,19 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }, 280)
       }
 
+      /**
+       * Where a card shortcut may fire: the card itself, its title bar, and the
+       * resize grip. The grip is a tab stop that advertises `aria-valuenow`, so
+       * landing on it must not lose the keys the title bar answers. A field or a
+       * button still keeps its own keys.
+       */
+      const onCardHandle = (target) => target === cardRef.current
+        || target === barRef.current
+        || (target instanceof Element && target.closest('.clipchat-card__grip') !== null)
+
       /** Arrow keys move (8/40px), Alt+arrows resize (8/32px), Home resets. */
       const onCardKeyDown = (event) => {
-        const target = event.target
-        if (target !== cardRef.current && target !== barRef.current) return
+        if (!onCardHandle(event.target)) return
         if (event.key === 'Home') {
           event.preventDefault?.()
           resetBox()
