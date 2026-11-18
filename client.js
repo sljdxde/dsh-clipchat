@@ -1854,6 +1854,49 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       return false
     }
 
+    /**
+     * One band per visual row of a span.
+     *
+     * `getClientRects()` nests an inline element's border box around the text it
+     * holds, so one row of prose with two code pills reports six rects whose
+     * bottoms disagree by a few pixels. Underlining every rect drew two green
+     * lines on one row, staggered wherever a pill sat. Rects are grouped by the
+     * row their centre falls in and folded into one band per row, whose bottom is
+     * the lowest edge so the line never crosses a pill's background.
+     *
+     * @param {DOMRect[]} rects - client rects of one span, in viewport space.
+     * @returns {Array<{ left: number, top: number, width: number, height: number }>} one band per row.
+     */
+    function rowsOfRects(rects) {
+      const rows = []
+      const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left)
+      for (const rect of sorted) {
+        const middle = (rect.top + rect.bottom) / 2
+        const row = rows.find((band) => middle > band.bandTop && middle < band.bandBottom)
+        if (row === undefined) {
+          rows.push({
+            bandTop: rect.top,
+            bandBottom: rect.bottom,
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+          })
+          continue
+        }
+        row.left = Math.min(row.left, rect.left)
+        row.right = Math.max(row.right, rect.right)
+        row.top = Math.min(row.top, rect.top)
+        row.bottom = Math.max(row.bottom, rect.bottom)
+      }
+      return rows.map((band) => ({
+        left: band.left,
+        top: band.top,
+        width: band.right - band.left,
+        height: band.bottom - band.top,
+      }))
+    }
+
     /** Redraw every highlight as absolutely positioned rects over the chat. */
     function renderAll() {
       if (typeof document === 'undefined' || document.body === null || document.body === undefined
@@ -1886,17 +1929,17 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             if (span === null) continue
             const range = rangeForSpan(block, span.start, span.end)
             if (range === null) continue
-            for (const rect of range.getClientRects()) {
-              if (rect.width <= 0 || rect.height <= 0) continue
+            const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0)
+            for (const band of rowsOfRects(rects)) {
               const mark = document.createElement('div')
               mark.className = id === pendingFlashId
                 ? 'clipchat-layer__line is-flash'
                 : 'clipchat-layer__line'
               mark.setAttribute('data-clipchat-id', id)
-              mark.style.left = `${(rect.left - columnRect.left) / scaleX - column.clientLeft + column.scrollLeft}px`
-              mark.style.top = `${(rect.top - columnRect.top) / scaleY - column.clientTop + column.scrollTop}px`
-              mark.style.width = `${rect.width / scaleX}px`
-              mark.style.height = `${rect.height / scaleY}px`
+              mark.style.left = `${(band.left - columnRect.left) / scaleX - column.clientLeft + column.scrollLeft}px`
+              mark.style.top = `${(band.top - columnRect.top) / scaleY - column.clientTop + column.scrollTop}px`
+              mark.style.width = `${band.width / scaleX}px`
+              mark.style.height = `${band.height / scaleY}px`
               layer.appendChild(mark)
             }
           }

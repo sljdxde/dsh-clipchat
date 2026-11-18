@@ -85,7 +85,7 @@ function anchorOf(env, { start = 0, end = 12, text = 'the selected' } = {}) {
   }
 }
 
-test('renderAll draws one underline per client rect', async () => {
+test('renderAll draws one underline per visual row', async () => {
   await withDom(chatHtml(), (t, env) => {
     stubRects(env)
     const id = t.addHighlight(anchorOf(env), null)
@@ -95,6 +95,40 @@ test('renderAll draws one underline per client rect', async () => {
     assert.equal(lines.length, 1, 'one rect produced one line')
     assert.equal(lines[0].getAttribute('data-clipchat-id'), id)
     assert.ok(lines[0].style.width.endsWith('px'), 'the line is positioned')
+  })
+})
+
+test('renderAll folds nested rects of one row into a single line', async () => {
+  await withDom(chatHtml(), (t, env) => {
+    // Chrome nests an inline element's border box around the text it holds, so a
+    // row with a code pill reports the pill's box and the text inside it, with
+    // bottoms a couple of pixels apart. Both used to become an underline.
+    env.window.Range.prototype.getClientRects = () => [
+      { left: 10, top: 20, width: 60, height: 20, right: 70, bottom: 40 },
+      { left: 15, top: 22, width: 50, height: 16, right: 65, bottom: 38 },
+      { left: 80, top: 20, width: 20, height: 20, right: 100, bottom: 40 },
+    ]
+    t.addHighlight(anchorOf(env), null)
+    t.renderAll()
+
+    const lines = env.document.querySelectorAll('.clipchat-layer__line')
+    assert.equal(lines.length, 1, 'one row keeps one underline')
+    assert.equal(Number.parseFloat(lines[0].style.left), 10, 'the line starts at the row start')
+    assert.equal(Number.parseFloat(lines[0].style.width), 90, 'the line spans the whole row')
+    assert.equal(Number.parseFloat(lines[0].style.top), 20)
+    assert.equal(Number.parseFloat(lines[0].style.height), 20, 'the line sits on the lowest edge')
+  })
+})
+
+test('renderAll keeps one underline per wrapped row', async () => {
+  await withDom(chatHtml(), (t, env) => {
+    env.window.Range.prototype.getClientRects = () => [
+      { left: 10, top: 20, width: 80, height: 18, right: 90, bottom: 38 },
+      { left: 10, top: 40, width: 40, height: 18, right: 50, bottom: 58 },
+    ]
+    t.addHighlight(anchorOf(env), null)
+    t.renderAll()
+    assert.equal(env.document.querySelectorAll('.clipchat-layer__line').length, 2, 'two rows, two lines')
   })
 })
 
