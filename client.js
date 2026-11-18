@@ -19,6 +19,48 @@ window.__ModuleLoader__.load({
     const NEIGHBOR_LIMIT = 2
     const SEARCH_LIMIT = 20
 
+    /* Drag and resize geometry. Distances are CSS pixels. */
+    /** Smallest card the user may shrink to; below this the footer has nowhere to go. */
+    const CARD_MIN_W = 420
+    const CARD_MIN_H = 320
+    /** Gap kept between the card and whatever contains it. */
+    const CARD_EDGE = 8
+    /** Window height reserved above and below the card. */
+    const CARD_VIEWPORT_SLACK = 120
+    /** How much of the card must stay grabbable once it is dragged off an edge. */
+    const CARD_KEEP_W = 96
+    const CARD_KEEP_H = 44
+    /** Travel below this is a click, not a drag: a shaky hand must not move the card. */
+    const CARD_CLICK_DISTANCE = 6
+    const CARD_CLICK_MS = 200
+    /** How long the card's opening animation gets before its class is dropped. */
+    const CARD_POP_MS = 200
+    /** One arrow key moves 8px, or 40px with Shift. */
+    const CARD_KEY_MOVE = 8
+    const CARD_KEY_MOVE_LARGE = 40
+    /** One Alt+arrow resizes 8px, or 32px with Shift. */
+    const CARD_KEY_RESIZE = 8
+    const CARD_KEY_RESIZE_LARGE = 32
+    /** Width a reset returns the card to, before the viewport caps it. */
+    const CARD_DEFAULT_W = 600
+    /**
+     * Direction letters for the resize hot areas; `se` also draws the visible grip.
+     * `ne` is deliberately absent: that corner is where the close button sits, and
+     * a hot area over it would swallow every press meant to dismiss the card.
+     */
+    const CARD_GRIPS = ['nw', 'sw', 'se', 'e', 's']
+    /** How many times a covered title bar is pushed clear before giving up. */
+    const CARD_REVEAL_ATTEMPTS = 4
+    /** A card nobody has moved or resized keeps the size its CSS gives it. */
+    /** Arrow keys, in the order the keyboard maps them to card coordinates. */
+    const CARD_KEY_VECTORS = {
+      ArrowLeft: { x: -1, y: 0 },
+      ArrowRight: { x: 1, y: 0 },
+      ArrowUp: { x: 0, y: -1 },
+      ArrowDown: { x: 0, y: 1 },
+    }
+    const CARD_BOX_DEFAULT = { w: null, h: null, dx: 0, dy: 0 }
+
     /* Constants and locale dictionaries. */
     const zh = {
       ask: '问这段',
@@ -26,6 +68,8 @@ window.__ModuleLoader__.load({
       close: '关闭',
       placeholder: '直接问，或选一个快问',
       inputHint: 'Enter 发送，Shift+Enter 换行',
+      dragHint: '拖动标题栏移动卡片。方向键移动，Alt+方向键改大小，Home 复位',
+      resizeHint: '拖动调整卡片大小',
       empty: '（未读到选段）',
       send: '发送',
       thinking: '正在回答…',
@@ -115,6 +159,8 @@ window.__ModuleLoader__.load({
       close: 'Close',
       placeholder: 'Ask, or pick a quick question',
       inputHint: 'Enter to send, Shift+Enter for a new line',
+      dragHint: 'Drag the title bar to move the card. Arrow keys move, Alt+arrows resize, Home resets',
+      resizeHint: 'Drag to resize the card',
       empty: '(no selected text)',
       send: 'Send',
       thinking: 'Answering…',
@@ -204,7 +250,7 @@ window.__ModuleLoader__.load({
 .clipchat-menu{display:flex;align-items:center;gap:6px}
 .clipchat-menu__ask{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);cursor:pointer;border-radius:999px;padding:5px 10px}
 .clipchat-menu__ask:hover{background:var(--dsw-alias-button-floating-hover)}
-.clipchat-card{position:relative;width:min(600px,calc(100vw - 32px));max-height:min(520px,64vh);box-sizing:border-box;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:14px;display:flex;flex-direction:column;animation:clipchat-pop .16s ease-out;
+.clipchat-card{position:relative;z-index:40;width:min(600px,calc(100vw - 32px));max-height:min(520px,64vh);box-sizing:border-box;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:14px;display:flex;flex-direction:column;
 /* Frosted glass: a translucent fill, the page blurred behind it, and a
    brighter top edge so the panel reads as a raised sheet rather than a box. */
 background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 78%,transparent);
@@ -216,17 +262,53 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card::before{background:linear-gradient(180deg,rgba(255,255,255,.07),transparent 42%)}}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.clipchat-card{background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill))}}
 @keyframes clipchat-pop{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){.clipchat-card{animation:none}}
+/* The opening animation belongs to the moment the card appears, so it is
+   scoped to a class the card carries only while that moment lasts. Leaving it
+   on the base rule made every gesture replay it: gestures turn animation off,
+   so ending one turned it back on — and a fresh CSS animation starts at its
+   first keyframe. The card faded out, snapped back to its anchor (the
+   keyframes' transform beats the inline one) and slid in again on every
+   release. The class is dropped once the animation has played, and a gesture
+   that starts first drops it too, so it can only ever run once. */
+.clipchat-card.is-entering{animation:clipchat-pop .16s ease-out}
+@media (prefers-reduced-motion:reduce){.clipchat-card.is-entering{animation:none}}
 .clipchat-card__bar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-secondary,#666);border-radius:14px 14px 0 0;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 45%,transparent)}
+/* The title bar is the move handle: no text selection, no native drag, no scroll. */
+.clipchat-card__bar{cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none}
+.clipchat-card__bar:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2f6fed);outline-offset:-2px}
+.clipchat-card.is-dragging .clipchat-card__bar{cursor:grabbing}
 .clipchat-card__mark{flex:none;font-size:12px;line-height:1;color:var(--dsw-alias-brand-primary,#2f6fed)}
 .clipchat-card__bar-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;line-height:1.5}
 .clipchat-card__close{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:4px 6px;border-radius:7px;transition:background .12s ease,color .12s ease}
 .clipchat-card__close:hover{background:var(--dsw-alias-button-floating-hover);color:var(--dsw-alias-label-primary)}
+/* Drag and resize. A live gesture drops the blur (a 24px backdrop filter re-runs
+   every frame) and any entry animation (its keyframes carry their own
+   transform, which would fight the inline one). Dropping the blur alone would
+   leave the card's 78% translucent fill bare — see-through mid-gesture — so the
+   gesture also swaps in the opaque surface colour: same solid sheet, cheaper
+   frame. */
+.clipchat-card.is-dragging,.clipchat-card.is-resizing{z-index:60;animation:none;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill))}
+.clipchat-card.is-settling{transition:width .28s ease,height .28s ease,transform .28s ease}
+@media (prefers-reduced-motion:reduce){.clipchat-card.is-settling{transition:none}}
+/* Hot areas sit inside the rounded corner so the card itself can clip nothing.
+   The top-right corner has none: the close button owns it. */
+.clipchat-card__grip{position:absolute;z-index:3;margin:0;padding:0;border:0;background:transparent;touch-action:none}
+.clipchat-card__grip--e{top:24px;bottom:24px;right:0;width:10px;cursor:ew-resize}
+.clipchat-card__grip--s{left:24px;right:24px;bottom:0;height:10px;cursor:ns-resize}
+.clipchat-card__grip--nw{top:0;left:0;width:16px;height:16px;cursor:nwse-resize}
+.clipchat-card__grip--sw{left:0;bottom:0;width:16px;height:16px;cursor:nesw-resize}
+.clipchat-card__grip--se{right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;display:flex;align-items:flex-end;justify-content:flex-end;color:var(--dsw-alias-label-secondary,#666)}
+/* The only visible one: three diagonal lines in the bottom-right corner. */
+.clipchat-card__grip--se::after{content:'';width:12px;height:12px;margin:3px;border-radius:1px;background:repeating-linear-gradient(135deg,transparent 0 2px,currentColor 2px 3px);opacity:.35}
+.clipchat-card__grip--se:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2f6fed);outline-offset:-2px}
 .clipchat-card__presets{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px 4px}
 .clipchat-card__preset{border:1px solid var(--dsw-alias-border-l3);background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 68%,transparent);color:var(--dsw-alias-label-secondary,#666);border-radius:999px;padding:4px 11px;font:var(--dsw-font-xs-13);line-height:1.4;cursor:pointer;box-shadow:0 1px 1.5px rgba(0,0,0,.04);transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease,box-shadow .12s ease}
 .clipchat-card__preset:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2,var(--dsw-alias-border-l3));background:var(--dsw-alias-button-floating-hover);transform:translateY(-1px)}
 .clipchat-card__preset:disabled{opacity:.5;cursor:default}
 .clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:12px 16px 12px}
+/* A card whose height the user pinned gives space to the footer first: the
+   thread keeps at least a line, then scrolls, instead of pushing the footer out. */
+.clipchat-card.is-sized .clipchat-card__thread{min-height:0}
 .clipchat-card__empty{display:flex;gap:10px;padding:18px 2px 10px}
 .clipchat-card__empty-mark{flex:none;font-size:26px;line-height:1;color:var(--dsw-alias-brand-primary,#2f6fed);opacity:.35}
 .clipchat-card__empty-text{display:flex;flex-direction:column;gap:3px;min-width:0}
@@ -330,7 +412,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-strip.is-on .clipchat-strip__foot b{color:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip.is-degraded .clipchat-strip__foot b{color:#b0741c}
 @media (prefers-reduced-motion:reduce){.clipchat-strip__detail{transition:none}}
-.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;padding:0 16px 12px;min-width:0;background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent);border-radius:0 0 14px 14px}
+.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:6px;padding:0 16px 12px;min-width:0;background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent);border-radius:0 0 14px 14px}
 .clipchat-card__footer>*{flex:none}
 .clipchat-card__footer .clipchat-card__spacer{flex:1 1 0;min-width:4px}
 .clipchat-card__modelwrap{position:relative;flex:0 1 auto;min-width:0;display:flex}
@@ -518,6 +600,338 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         if (offset >= end) break
       }
       return segments
+    }
+
+    /**
+     * Card geometry: `w`/`h` are the size the user chose (null = the CSS size),
+     * `dx`/`dy` the offset from wherever the host anchored the card.
+     * @typedef {{ w: number|null, h: number|null, dx: number, dy: number }} CardBox
+     */
+
+    /** Last card size each session ended at; memory only, never persisted. */
+    const cardSizes = new Map()
+
+    /** The remembered size for one session, or the CSS defaults. */
+    function rememberedBox(sessionId) {
+      const stored = typeof sessionId === 'string' ? cardSizes.get(sessionId) : undefined
+      if (stored === undefined) return CARD_BOX_DEFAULT
+      return { w: stored.w, h: stored.h, dx: 0, dy: 0 }
+    }
+
+    /** Remember the size (never the place: a place belongs to one passage). */
+    function rememberBox(sessionId, box) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return
+      cardSizes.set(sessionId, { w: box.w, h: box.h })
+    }
+
+    /** Window size, from the layout viewport rather than `100vw` (no scrollbar). */
+    function viewportOf() {
+      const root = typeof document === 'undefined' ? null : document.documentElement
+      const width = (root === null ? 0 : root.clientWidth) || (typeof window === 'undefined' ? 0 : window.innerWidth) || 0
+      const height = (root === null ? 0 : root.clientHeight) || (typeof window === 'undefined' ? 0 : window.innerHeight) || 0
+      return { width, height }
+    }
+
+    /** Keep `value` inside [min, max]; a container smaller than the card pins to min. */
+    function clampNumber(value, min, max) {
+      return Math.min(Math.max(value, min), Math.max(min, max))
+    }
+
+    /** The first ancestor that clips its children, or null when none does. */
+    function clipRectOf(element) {
+      if (typeof document === 'undefined' || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return null
+      let node = element?.parentElement ?? null
+      while (node !== null && node !== undefined && node !== document.documentElement && node !== document.body) {
+        const style = window.getComputedStyle(node)
+        if (style !== null && style !== undefined && (style.overflowX !== 'visible' || style.overflowY !== 'visible')) {
+          const rect = node.getBoundingClientRect()
+          if (rect.width > 0 && rect.height > 0) {
+            return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+          }
+        }
+        node = node.parentElement
+      }
+      return null
+    }
+
+    /**
+     * The conversation column: the box the host lays its message nodes out in.
+     *
+     * The chrome a card must not sit under lives in the gutter beside this
+     * column (the turn-outline rail), so the column's right edge is the line the
+     * card's right edge has to stay left of. Measured from the message nodes
+     * themselves — the host's column is centred and its width is its own
+     * business, while a window-edge guess is what put the close button under
+     * the rail in the first place. Reading the nodes also keeps this
+     * deterministic: a sampled hit test answers differently depending on where
+     * the rail's marks happen to be.
+     *
+     * @param {Element|null|undefined} card - the card being measured, skipped when met.
+     * @returns {{ left: number, right: number }|null} column edges, or null when no message is on the page.
+     */
+    function columnRectOf(card) {
+      if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
+      let left = Infinity
+      let right = -Infinity
+      for (const node of document.querySelectorAll('[data-chat-node-key], [data-chat-turn]')) {
+        if (card !== null && card !== undefined && typeof node.contains === 'function' && node.contains(card)) continue
+        const rect = node.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) continue
+        left = Math.min(left, rect.left)
+        right = Math.max(right, rect.right)
+      }
+      return right > left ? { left, right } : null
+    }
+
+    /**
+     * The top of the chrome pinned over the bottom of the page: the composer.
+     *
+     * It is an ancestor of nothing the card owns, so no clipping search finds
+     * it, and a title bar dragged under it can never be grabbed back. Found from
+     * the page's own text input: the first box in its ancestry that reaches the
+     * bottom edge of the window is the pinned bar. A hit test cannot do this
+     * job — where the card is, the topmost thing at the bottom of the page is
+     * the card being moved.
+     *
+     * @param {Element|null|undefined} card - the card being measured; its own input is skipped.
+     * @returns {number|null} the bar's top edge, in client coordinates.
+     */
+    function pinnedTopOf(card) {
+      if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
+      const view = viewportOf()
+      if (!(view.height > 0)) return null
+      for (const input of document.querySelectorAll('textarea, [contenteditable="true"]')) {
+        if (card !== null && card !== undefined && typeof card.contains === 'function' && card.contains(input)) continue
+        for (let node = input; node !== null && node !== undefined && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+          const rect = node.getBoundingClientRect()
+          if (rect.height > 0 && rect.width > 0 && rect.bottom >= view.height - 24 && rect.height <= view.height * 0.5) return rect.top
+        }
+      }
+      return null
+    }
+
+    /**
+     * The room the host leaves a card: inside the conversation column, above the
+     * composer. An edge the page does not show stays null, and a null edge caps
+     * nothing — a page without messages or without a composer behaves as before.
+     *
+     * @param {Element|null|undefined} card - the card being measured.
+     * @returns {{ right: number|null, bottom: number|null }|null} the edges to stop before.
+     */
+    function cardRoomOf(card) {
+      const column = columnRectOf(card)
+      const bottom = pinnedTopOf(card)
+      if (column === null && bottom === null) return null
+      return { right: column === null ? null : column.right, bottom }
+    }
+
+    /**
+     * Where a card may be and how big it may get: the window, narrowed by the
+     * container that clips it (the host's centre column does).
+     * @param {{ width: number, height: number }} viewport - window size.
+     * @param {{ left: number, top: number, right: number, bottom: number }|null} container - clipping rect.
+     * @param {{ right?: number|null, bottom?: number|null }} [room] - the conversation column and the composer, over the page.
+     * @returns {{ left: number, top: number, right: number, bottom: number, minW: number, minH: number, maxW: number, maxH: number }} limits.
+     */
+    function cardLimits(viewport, container, room) {
+      const viewLeft = 0
+      const viewTop = 0
+      const viewRight = viewport?.width > 0 ? viewport.width : Infinity
+      const viewBottom = viewport?.height > 0 ? viewport.height : Infinity
+      const left = container === null || container === undefined ? viewLeft : Math.max(viewLeft, container.left)
+      const top = container === null || container === undefined ? viewTop : Math.max(viewTop, container.top)
+      // The composer and the rail beside the conversation are not clipping
+      // containers, but the card must stop before them: a control under the
+      // rail cannot be clicked and a title bar under the composer cannot be
+      // grabbed back. The clip rect alone misses both — it is the scrolled
+      // content box, so its bottom edge travels with the conversation.
+      const columnRight = typeof room?.right === 'number' && room.right > 0 ? room.right : Infinity
+      const composerTop = typeof room?.bottom === 'number' && room.bottom > 0 ? room.bottom : Infinity
+      const right = Math.min(container === null || container === undefined ? viewRight : Math.min(viewRight, container.right), columnRight)
+      const bottom = Math.min(container === null || container === undefined ? viewBottom : Math.min(viewBottom, container.bottom), composerTop)
+      const usableW = Math.max(right - left - CARD_EDGE * 2, 1)
+      const usableH = Math.max(bottom - top - CARD_EDGE * 2, 1)
+      // Both axes also respect the window itself: a container that reaches past
+      // the viewport edge (the host's column starts at x=0 while its overlay is
+      // inset) must not hand the card a width that pokes out of the screen.
+      const widthRoom = viewport?.width > 0 ? Math.max(viewport.width - CARD_EDGE * 2, 1) : Infinity
+      const windowRoom = viewport?.height > 0 ? Math.max(viewport.height - CARD_VIEWPORT_SLACK, 1) : Infinity
+      const maxW = Math.min(usableW, widthRoom)
+      const maxH = Math.max(Math.min(usableH, windowRoom), 1)
+      return {
+        left: left + CARD_EDGE,
+        top: top + CARD_EDGE,
+        right: right - CARD_EDGE,
+        bottom: bottom - CARD_EDGE,
+        minW: Math.min(CARD_MIN_W, maxW),
+        minH: Math.min(CARD_MIN_H, maxH),
+        maxW,
+        maxH,
+      }
+    }
+
+    /** The card's rect with the current offset taken back out, so maths starts from base. */
+    function cardFrameOf(rect, box) {
+      return {
+        left: (rect?.left ?? 0) - (box?.dx ?? 0),
+        top: (rect?.top ?? 0) - (box?.dy ?? 0),
+        width: rect?.width ?? 0,
+        height: rect?.height ?? 0,
+      }
+    }
+
+    /**
+     * Move the card by a pointer travel, stopped so `CARD_KEEP_W/H` stays reachable.
+     * @param {CardBox} box - geometry at gesture start.
+     * @param {{ x: number, y: number }} delta - travel since the gesture started.
+     * @param {{ left: number, top: number, width: number, height: number }} rect - base rect.
+     * @param {object} limits - from `cardLimits()`.
+     * @returns {CardBox} the moved box.
+     */
+    function dragBox(box, delta, rect, limits) {
+      const width = box.w ?? rect.width
+      const height = box.h ?? rect.height
+      const left = clampNumber(
+        rect.left + box.dx + delta.x,
+        limits.left - width + CARD_KEEP_W,
+        limits.right - CARD_KEEP_W,
+      )
+      // Vertically the card may hang off the bottom, but its top edge never
+      // leaves the container: the title bar is the only way to grab it back, so
+      // a card whose bar is off screen could never be recovered.
+      const top = clampNumber(
+        rect.top + box.dy + delta.y,
+        limits.top,
+        limits.bottom - CARD_KEEP_H,
+      )
+      return { ...box, dx: Math.round(left - rect.left), dy: Math.round(top - rect.top) }
+    }
+
+    /**
+     * Stretch the card from one edge or corner; the opposite edge stays put.
+     * @param {CardBox} box - geometry at gesture start.
+     * @param {string} dir - edge letters, e.g. `e`, `sw`, `ne`.
+     * @param {{ x: number, y: number }} delta - travel since the gesture started.
+     * @param {{ left: number, top: number, width: number, height: number }} rect - base rect.
+     * @param {object} limits - from `cardLimits()`.
+     * @returns {CardBox} the resized box.
+     */
+    function resizeBox(box, dir, delta, rect, limits) {
+      let left = rect.left + box.dx
+      let top = rect.top + box.dy
+      let right = left + (box.w ?? rect.width)
+      let bottom = top + (box.h ?? rect.height)
+      if (dir.includes('e')) right = clampNumber(right + delta.x, left + limits.minW, Math.min(limits.right, left + limits.maxW))
+      if (dir.includes('w')) left = clampNumber(left + delta.x, Math.max(limits.left, right - limits.maxW), right - limits.minW)
+      if (dir.includes('s')) bottom = clampNumber(bottom + delta.y, top + limits.minH, Math.min(limits.bottom, top + limits.maxH))
+      if (dir.includes('n')) top = clampNumber(top + delta.y, Math.max(limits.top, bottom - limits.maxH), bottom - limits.minH)
+      // Only pin the axis this edge actually controls; the other one keeps
+      // following the content the way it did before the gesture.
+      const movesW = dir.includes('e') || dir.includes('w')
+      const movesH = dir.includes('n') || dir.includes('s')
+      return {
+        w: movesW || box.w !== null ? Math.round(right - left) : null,
+        h: movesH || box.h !== null ? Math.round(bottom - top) : null,
+        dx: Math.round(left - rect.left),
+        dy: Math.round(top - rect.top),
+      }
+    }
+
+    /** Shrink and move a card back inside the limits, e.g. after the window shrank. */
+    function fitBox(box, rect, limits) {
+      // A size the user chose is clamped; a card still at its CSS size keeps
+      // that size (the stylesheet already fits it to the viewport).
+      const width = box.w === null || box.w === undefined ? rect.width : clampNumber(box.w, limits.minW, limits.maxW)
+      const height = box.h === null || box.h === undefined ? rect.height : clampNumber(box.h, limits.minH, limits.maxH)
+      // A shrunken window should show the whole card, not the 96px a drag leaves.
+      const left = clampNumber(rect.left + box.dx, limits.left, Math.max(limits.left, limits.right - width))
+      const top = clampNumber(rect.top + box.dy, limits.top, Math.max(limits.top, limits.bottom - height))
+      return {
+        w: box.w === null || box.w === undefined ? null : Math.round(width),
+        h: box.h === null || box.h === undefined ? null : Math.round(height),
+        dx: Math.round(left - rect.left),
+        dy: Math.round(top - rect.top),
+      }
+    }
+
+    /**
+     * Push a card down while the host's own chrome covers its title bar.
+     *
+     * The bar is the only move handle, so a bar behind a sticky header would
+     * strand the card: the numbers alone cannot see the header, a hit test can.
+     * It repeats, because the chrome at the top is often more than one layer.
+     */
+    function revealTitleBar(card, box, rect, limits) {
+      if (typeof document === 'undefined' || typeof document.elementFromPoint !== 'function') return box
+      const bar = typeof card?.querySelector === 'function' ? card.querySelector('.clipchat-card__bar') : null
+      if (bar === null || bar === undefined || typeof bar.getBoundingClientRect !== 'function') return box
+      let next = box
+      for (let attempt = 0; attempt < CARD_REVEAL_ATTEMPTS; attempt += 1) {
+        const barRect = bar.getBoundingClientRect()
+        if (barRect.width <= 0 || barRect.height <= 0) return next
+        // Sample the part of the bar that is inside the visible area: a card
+        // dragged half off the left edge has its centre off screen, and a hit
+        // test out there answers null instead of "the header covers it".
+        const sampleLeft = Math.max(barRect.left, limits.left)
+        const sampleRight = Math.min(barRect.right, limits.right)
+        const sampleTop = Math.max(barRect.top, limits.top)
+        if (sampleRight - sampleLeft < 4 || sampleTop > limits.bottom) return next
+        const hit = document.elementFromPoint((sampleLeft + sampleRight) / 2, sampleTop + barRect.height / 2)
+        if (hit === null || hit === undefined || typeof hit.closest !== 'function' || hit.closest('.clipchat-card') !== null) return next
+        const cover = typeof hit.getBoundingClientRect === 'function' ? hit.getBoundingClientRect() : null
+        if (cover === null || cover.height <= 0) return next
+        const shift = cover.bottom - barRect.top + CARD_EDGE
+        if (shift <= 0) return next
+        const shifted = dragBox(next, { x: 0, y: shift }, rect, limits)
+        if (shifted.dy === next.dy) return next
+        next = shifted
+        // Paint the intermediate place: the next hit test has to see it.
+        card.style.transform = boxStyleOf(next)?.transform ?? ''
+      }
+      return next
+    }
+
+    /** Inline style for a card box; nothing until the user has moved or resized it. */
+    function boxStyleOf(box) {
+      const style = {}
+      if (typeof box?.w === 'number') style.width = `${box.w}px`
+      if (typeof box?.h === 'number') {
+        style.height = `${box.h}px`
+        // Only a height the user chose lifts the stylesheet's cap. A card whose
+        // width alone was pinned still grows with its answer, and it has to stop
+        // at the same `min(520px, 64vh)` a fresh card does: clearing the cap for
+        // a width-only card let a long answer run it off the bottom of the
+        // window (measured 1595px tall on a 900px viewport).
+        style.maxHeight = 'none'
+      }
+      if (box?.dx !== 0 || box?.dy !== 0) style.transform = `translate3d(${box.dx}px, ${box.dy}px, 0)`
+      return Object.keys(style).length === 0 ? undefined : style
+    }
+
+    /** The cursor a live gesture holds, so it does not flicker as the pointer travels. */
+    function cursorOfGesture(kind, dir) {
+      if (kind === 'move') return 'grabbing'
+      if (dir === 'n' || dir === 's') return 'ns-resize'
+      if (dir === 'e' || dir === 'w') return 'ew-resize'
+      if (dir === 'ne' || dir === 'sw') return 'nesw-resize'
+      return 'nwse-resize'
+    }
+
+    /**
+     * Whether a press belongs to a control rather than to the card's geometry.
+     *
+     * The resize hot areas are invisible overlays above the card's own content,
+     * so one that reached a button would take the press before the button ever
+     * saw it — which is exactly how the top-right corner used to swallow the
+     * close click. No hot area sits over a button any more; this is the runtime
+     * guard for the rest: a press on a control starts no gesture and keeps its
+     * click, wherever it came from.
+     *
+     * @param {EventTarget|null|undefined} target - the element under the pointer.
+     * @returns {boolean} whether the press is the control's, not the card's.
+     */
+    function pressOwnedByControl(target) {
+      return target instanceof Element && target.closest('button, a, input, textarea, select') !== null
     }
 
     /** Stored highlights keyed by id: `{ id, anchor, createdAt }`. */
@@ -2740,6 +3154,287 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const [detailOpen, setDetailOpen] = React.useState(false)
       const [, bumpRecords] = React.useState(0)
 
+      // Card geometry. A gesture paints the live box straight onto the DOM and
+      // React only hears about it once the gesture ends: a setState per pointer
+      // move would re-render the card — and re-parse the Markdown answer — on
+      // every frame of a drag.
+      const [box, setBox] = React.useState(() => rememberedBox(sessionId))
+      const boxRef = React.useRef(box)
+      const gestureRef = React.useRef(null)
+      const [gestureKind, setGestureKind] = React.useState(null)
+      const [settling, setSettling] = React.useState(false)
+      const [entering, setEntering] = React.useState(true)
+      const [maxWidth, setMaxWidth] = React.useState(CARD_DEFAULT_W)
+      const barRef = React.useRef(null)
+      const settleTimerRef = React.useRef(null)
+      const bodyStyleRef = React.useRef(null)
+
+      /** Measure the card and the limits it must respect right now. */
+      const frameOf = () => {
+        const card = cardRef.current
+        if (card === null || card === undefined || typeof card.getBoundingClientRect !== 'function') return null
+        const rect = card.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return null
+        return { rect: cardFrameOf(rect, boxRef.current), limits: cardLimits(viewportOf(), clipRectOf(card), cardRoomOf(card)) }
+      }
+
+      /** Paint one box onto the card without a React render. */
+      const paintBox = (next) => {
+        boxRef.current = next
+        const card = cardRef.current
+        if (card === null || card === undefined) return
+        const style = boxStyleOf(next) ?? {}
+        card.style.width = style.width ?? ''
+        card.style.height = style.height ?? ''
+        card.style.maxHeight = style.maxHeight ?? ''
+        card.style.transform = style.transform ?? ''
+        // The pinned-height rule belongs to the size on screen, not to the last
+        // committed one: a height being dragged must give the footer its room on
+        // the same frame, or the footer snaps inside when the drag ends.
+        card.classList.toggle('is-sized', typeof next.h === 'number')
+      }
+
+      /** Paint one box and hand it back to React. */
+      const commitBox = (next) => {
+        paintBox(next)
+        rememberBox(sessionId, next)
+        setBox(next)
+      }
+
+      /** Body-level side effects of a gesture; every ending restores them. */
+      const lockBody = (cursor) => {
+        if (typeof document === 'undefined' || document.body === null || document.body === undefined) return
+        if (bodyStyleRef.current === null) {
+          bodyStyleRef.current = { cursor: document.body.style.cursor, userSelect: document.body.style.userSelect }
+        }
+        document.body.style.cursor = cursor
+        document.body.style.userSelect = 'none'
+      }
+
+      const unlockBody = () => {
+        if (typeof document === 'undefined' || document.body === null || document.body === undefined) return
+        const saved = bodyStyleRef.current
+        bodyStyleRef.current = null
+        if (saved === null) return
+        document.body.style.cursor = saved.cursor
+        document.body.style.userSelect = saved.userSelect
+      }
+
+      /** Start a move (`kind` = 'move') or a resize along `dir`. */
+      const beginGesture = (kind, dir) => (event) => {
+        if (event === null || event === undefined) return
+        if (event.button !== undefined && event.button !== 0) return
+        if (gestureRef.current !== null) return
+        // A press on the close button (or any control) is the control's: the
+        // gesture must not cancel it, or the card could not be dismissed.
+        if (pressOwnedByControl(event.target)) return
+        const frame = frameOf()
+        if (frame === null) return
+        // Cancelling the press keeps the text selection alive: an ordinary
+        // mousedown inside the card clears it, and the host anchors the whole
+        // surface to that selection.
+        event.preventDefault?.()
+        // The host closes the surface when focus leaves it, so take focus here
+        // rather than wait for a mousedown that may never arrive.
+        cardRef.current?.focus?.()
+        gestureRef.current = {
+          kind,
+          dir,
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          startedAt: Date.now(),
+          box: boxRef.current,
+          rect: frame.rect,
+          limits: frame.limits,
+          moved: false,
+        }
+        lockBody(cursorOfGesture(kind, dir))
+        setGestureKind(kind)
+        // The opening moment ends at the first press: even if the animation
+        // finished a moment ago, the class must not be around when this gesture
+        // ends, or the gesture rule turning it back on would replay it.
+        setEntering(false)
+        const card = cardRef.current
+        if (typeof card.setPointerCapture === 'function' && event.pointerId !== undefined) {
+          try {
+            card.setPointerCapture(event.pointerId)
+          } catch {
+            /* capture keeps the pointer bound to the card; the window listeners work regardless */
+          }
+        }
+      }
+
+      /** Follow a live gesture. */
+      const onGestureMove = (event) => {
+        const gesture = gestureRef.current
+        if (gesture === null) return
+        if (gesture.pointerId !== undefined && event.pointerId !== undefined && gesture.pointerId !== event.pointerId) return
+        const delta = { x: event.clientX - gesture.x, y: event.clientY - gesture.y }
+        if (!gesture.moved
+          && Math.abs(delta.x) < CARD_CLICK_DISTANCE
+          && Math.abs(delta.y) < CARD_CLICK_DISTANCE) return
+        gesture.moved = true
+        paintBox(gesture.kind === 'move'
+          ? dragBox(gesture.box, delta, gesture.rect, gesture.limits)
+          : resizeBox(gesture.box, gesture.dir, delta, gesture.rect, gesture.limits))
+      }
+
+      /** End a gesture; a press that never travelled leaves the geometry alone. */
+      const endGesture = () => {
+        const gesture = gestureRef.current
+        if (gesture === null) return
+        gestureRef.current = null
+        unlockBody()
+        const card = cardRef.current
+        if (card !== null && card !== undefined && typeof card.releasePointerCapture === 'function' && gesture.pointerId !== undefined) {
+          try {
+            card.releasePointerCapture(gesture.pointerId)
+          } catch {
+            /* the capture is already gone */
+          }
+        }
+        const travelled = gesture.moved === true
+        const now = Date.now()
+        const clicked = !travelled && now - gesture.startedAt < CARD_CLICK_MS
+        setGestureKind(null)
+        if (clicked) {
+          paintBox(gesture.box)
+          return
+        }
+        commitBox(boxRef.current)
+        const frame = frameOf()
+        if (frame === null) return
+        const uncovered = revealTitleBar(cardRef.current, boxRef.current, frame.rect, frame.limits)
+        if (uncovered.dy !== boxRef.current.dy) commitBox(uncovered)
+      }
+
+      /** Home: back to the default size at the anchor. */
+      const resetBox = () => {
+        const frame = frameOf()
+        const limits = frame === null ? cardLimits(viewportOf(), null, cardRoomOf(cardRef.current)) : frame.limits
+        const home = { w: Math.round(clampNumber(CARD_DEFAULT_W, limits.minW, limits.maxW)), h: null, dx: 0, dy: 0 }
+        // Home means "back to the default size at the anchor", but a narrow
+        // window can leave the host's anchor too close to an edge: fit the card
+        // back inside rather than let its right edge leave the screen.
+        commitBox(frame === null ? home : fitBox(home, frame.rect, limits))
+        setSettling(true)
+        if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return
+        clearTimeout(settleTimerRef.current)
+        settleTimerRef.current = window.setTimeout(() => {
+          settleTimerRef.current = null
+          setSettling(false)
+        }, 280)
+      }
+
+      /** Arrow keys move (8/40px), Alt+arrows resize (8/32px), Home resets. */
+      const onCardKeyDown = (event) => {
+        const target = event.target
+        if (target !== cardRef.current && target !== barRef.current) return
+        if (event.key === 'Home') {
+          event.preventDefault?.()
+          resetBox()
+          return
+        }
+        const direction = CARD_KEY_VECTORS[event.key]
+        if (direction === undefined) return
+        const frame = frameOf()
+        if (frame === null) return
+        event.preventDefault?.()
+        if (event.altKey === true) {
+          // The arrow names the edge that moves and the size is always positive:
+          // right/down grow, left/up pull the opposite edge in.
+          const size = event.shiftKey === true ? CARD_KEY_RESIZE_LARGE : CARD_KEY_RESIZE
+          const dir = direction.x !== 0 ? (direction.x > 0 ? 'e' : 'w') : (direction.y > 0 ? 's' : 'n')
+          commitBox(resizeBox(boxRef.current, dir, { x: size, y: size }, frame.rect, frame.limits))
+          return
+        }
+        const size = event.shiftKey === true ? CARD_KEY_MOVE_LARGE : CARD_KEY_MOVE
+        commitBox(dragBox(boxRef.current, { x: direction.x * size, y: direction.y * size }, frame.rect, frame.limits))
+      }
+
+      // The opening animation runs once, as the card appears. Its class is
+      // dropped once it has played, so no later state change (a gesture ending,
+      // for one) can turn the animation back on and replay it.
+      React.useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') return undefined
+        const timer = window.setTimeout(() => setEntering(false), CARD_POP_MS)
+        return () => window.clearTimeout(timer)
+      }, [])
+
+      // A live gesture is watched on the window: the card can be dragged out
+      // from under the pointer, and every ending — release, cancel, lost
+      // capture, window blur — must put the page back the way it was.
+      React.useEffect(() => {
+        if (gestureKind === null || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const onEnd = () => endGesture()
+        window.addEventListener('pointermove', onGestureMove)
+        window.addEventListener('pointerup', onEnd)
+        window.addEventListener('pointercancel', onEnd)
+        window.addEventListener('lostpointercapture', onEnd)
+        window.addEventListener('blur', onEnd)
+        return () => {
+          window.removeEventListener('pointermove', onGestureMove)
+          window.removeEventListener('pointerup', onEnd)
+          window.removeEventListener('pointercancel', onEnd)
+          window.removeEventListener('lostpointercapture', onEnd)
+          window.removeEventListener('blur', onEnd)
+        }
+      }, [gestureKind])
+
+      // The window changed size: shrink and move the card back inside what is
+      // left of its container instead of letting it hang off the edge.
+      React.useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const onResize = () => {
+          const apply = () => {
+            if (gestureRef.current !== null) return
+            const frame = frameOf()
+            if (frame === null) return
+            setMaxWidth(Math.round(frame.limits.maxW))
+            commitBox(fitBox(boxRef.current, frame.rect, frame.limits))
+          }
+          apply()
+          // The host re-lays its column out after the window changed and
+          // re-anchors the card a beat later: fit once more on the next frame,
+          // or the card stays where the old anchor left it and hangs off-screen.
+          if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(apply)
+        }
+        window.addEventListener('resize', onResize)
+        return () => window.removeEventListener('resize', onResize)
+      }, [])
+
+      // Fit the card into this window on mount, and once more on the next
+      // frame: the host anchors the card after our first render, and a card
+      // reopened in a narrow window would otherwise keep the size it was given
+      // while sitting at an anchor its right edge cannot reach.
+      React.useEffect(() => {
+        const card = cardRef.current
+        if (card === null || card === undefined) return
+        const apply = (withPlace) => {
+          // A live gesture owns the geometry: a fit landing mid-drag would
+          // yank the card out from under the pointer.
+          if (gestureRef.current !== null) return
+          const measured = frameOf()
+          const limits = measured === null ? cardLimits(viewportOf(), clipRectOf(card), cardRoomOf(card)) : measured.limits
+          setMaxWidth(Math.round(limits.maxW))
+          const current = boxRef.current
+          const width = current.w === null || current.w === undefined ? null : Math.min(current.w, Math.round(limits.maxW))
+          const height = current.h === null || current.h === undefined ? null : Math.min(current.h, Math.round(limits.maxH))
+          const sized = { ...current, w: width, h: height }
+          // A rect still at the origin has not been placed by the host yet; its
+          // numbers say nothing about where the card will end up.
+          const placed = measured !== null && (measured.rect.left !== 0 || measured.rect.top !== 0)
+          const next = !withPlace || !placed ? sized : fitBox(sized, measured.rect, limits)
+          if (next.w !== current.w || next.h !== current.h || next.dx !== current.dx || next.dy !== current.dy) commitBox(next)
+        }
+        // The first pass only trims the size: before the host has put the card
+        // anywhere, its rect is not a place worth correcting. The next frame
+        // does place too, once the host's own layout has landed.
+        apply(false)
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => apply(true))
+      }, [])
+
       // One unconditional hook per snapshot slice; the fallback keeps the call
       // shape stable for harnesses without `useChat`.
       const useChatSlice = typeof useChat === 'function' ? useChat : () => undefined
@@ -2773,6 +3468,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         aliveRef.current = false
         controllerRef.current?.abort()
         controllerRef.current = null
+        // A card that is dismissed mid-gesture must not leave the whole page
+        // un-selectable or wearing a resize cursor.
+        unlockBody()
+        if (settleTimerRef.current !== null) clearTimeout(settleTimerRef.current)
+        settleTimerRef.current = null
       }, [])
 
       // Clear the per-turn “copied” label after a moment.
@@ -3392,10 +4092,14 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             }, expanded ? translate('collapseAnswer') : translate('expandAnswer'))))
       }
 
+      const gestureClass = gestureKind === 'move' ? ' is-dragging' : (gestureKind === 'resize' ? ' is-resizing' : '')
+      const sizeClass = box.h === null ? '' : ' is-sized'
       return h('div', {
         ref: cardRef,
-        className: `clipchat-card${recordsOpen ? ' is-records' : ''}`,
+        className: `clipchat-card${entering ? ' is-entering' : ''}${recordsOpen ? ' is-records' : ''}${sizeClass}${gestureClass}${settling ? ' is-settling' : ''}`,
+        style: boxStyleOf(box),
         tabIndex: -1,
+        onKeyDown: onCardKeyDown,
         onMouseDown: (event) => {
           const target = event.target
           // A control keeps its own focus; anything else focuses the card so the
@@ -3404,7 +4108,16 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           cardRef.current?.focus?.()
         },
       },
-        h('div', { className: 'clipchat-card__bar' },
+        h('div', {
+          ref: barRef,
+          className: 'clipchat-card__bar',
+          role: 'group',
+          tabIndex: 0,
+          draggable: false,
+          title: translate('dragHint'),
+          'aria-label': translate('dragHint'),
+          onPointerDown: beginGesture('move', ''),
+        },
           h('span', { className: 'clipchat-card__mark' }, '✦'),
           h('span', {
             className: 'clipchat-card__bar-text',
@@ -3594,6 +4307,27 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           : insertState === 'inserted'
             ? h('div', { className: 'clipchat-card__hint clipchat-card__note' }, translate('inserted'))
             : null,
+
+        // One visible grip in the bottom-right corner; every other hot area is
+        // invisible. Only the visible one enters the tab order — the keyboard
+        // equivalent for all of them is Alt+arrow.
+        CARD_GRIPS.map((dir) => {
+          const visible = dir === 'se'
+          return h('div', {
+            key: dir,
+            className: `clipchat-card__grip clipchat-card__grip--${dir}`,
+            role: visible ? 'separator' : undefined,
+            tabIndex: visible ? 0 : -1,
+            'aria-hidden': visible ? undefined : true,
+            'aria-label': visible ? translate('resizeHint') : undefined,
+            'aria-orientation': visible ? 'horizontal' : undefined,
+            'aria-valuenow': visible ? (box.w ?? CARD_DEFAULT_W) : undefined,
+            'aria-valuemin': visible ? CARD_MIN_W : undefined,
+            'aria-valuemax': visible ? Math.max(maxWidth, CARD_MIN_W) : undefined,
+            title: visible ? translate('resizeHint') : undefined,
+            onPointerDown: beginGesture('resize', dir),
+          })
+        }),
       )
     }
 
@@ -3766,6 +4500,24 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         persistRecord,
         addRecord,
         removeRecord,
+        cardLimits,
+        cardRoomOf,
+        columnRectOf,
+        pinnedTopOf,
+        clampNumber,
+        viewportOf,
+        clipRectOf,
+        cardFrameOf,
+        dragBox,
+        resizeBox,
+        fitBox,
+        boxStyleOf,
+        cursorOfGesture,
+        pressOwnedByControl,
+        revealTitleBar,
+        rememberedBox,
+        rememberBox,
+        cardSizes,
       },
     }
   },
