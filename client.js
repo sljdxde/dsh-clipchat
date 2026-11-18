@@ -255,10 +255,17 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card__lang{display:block;padding:5px 11px 0;text-align:right;font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:10.5px;line-height:1.3;color:var(--dsw-alias-label-secondary,#666);opacity:.65}
 .clipchat-card__code>:first-child.clipchat-card__pre{padding-top:9px}
 .clipchat-card__a .clipchat-card__pre code{background:none;padding:0;border-radius:0;font-size:12.5px;line-height:inherit}
-/* A table scrolls inside its own box: a wide grid must not widen the card. */
+/* A table scrolls inside its own box: a wide grid must not widen the card.
+   A header never wraps, so its own text is part of the table's minimum width:
+   eight columns overflow the box and scroll, instead of being squeezed until
+   each header reads one character per line. Body cells still wrap, so a two-
+   or three-column table keeps filling the card and a long cell reads as prose
+   rather than one unbroken line. The compromise is deliberate: a header long
+   enough to matter makes its column that wide and the box scrolls. */
 .clipchat-card__tablewrap{margin:9px 0 0;overflow-x:auto;border:1px solid var(--dsw-alias-border-l3);border-radius:9px}
 .clipchat-card__table{border-collapse:collapse;width:100%;table-layout:auto;font-size:12.5px;line-height:1.6}
 .clipchat-card__table th,.clipchat-card__table td{border-bottom:1px solid var(--dsw-alias-border-l3);border-right:1px solid var(--dsw-alias-border-l3);padding:5px 9px;text-align:left;vertical-align:top;white-space:pre-wrap}
+.clipchat-card__table th{white-space:nowrap}
 .clipchat-card__table tr>:last-child{border-right:none}
 .clipchat-card__table tbody tr:last-child>*{border-bottom:none}
 .clipchat-card__th{font-weight:600;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08))}

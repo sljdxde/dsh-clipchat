@@ -287,6 +287,66 @@ test('a column without alignment leaves the cell style alone', async () => {
   assert.equal(nodesOf(nodes, 'th')[0].args[1].style, undefined)
 })
 
+/* --- table styles */
+
+/**
+ * The declarations that apply to one selector, in stylesheet order.
+ *
+ * jsdom parses the injected stylesheet, so this reads the same cascade the
+ * browser uses instead of matching a string that a later edit could reformat.
+ * @param {string} selector - exact selector text.
+ * @returns {Array<object>} matching declaration blocks, in order.
+ */
+function declarationsFor(selector) {
+  const out = []
+  for (const sheet of globalThis.document.styleSheets) {
+    for (const rule of sheet.cssRules) {
+      if (rule.selectorText === undefined) continue
+      const selectors = rule.selectorText.split(',').map((part) => part.trim())
+      if (selectors.includes(selector)) out.push(rule.style)
+    }
+  }
+  return out
+}
+
+/** Load the bundle and inject its stylesheet, so the CSSOM can be read. */
+async function withStyles(run) {
+  const env = installDom('')
+  try {
+    const { definition, styles } = await loadBundle()
+    definition.factory(() => makeReact()).__test.ensureStyle()
+    assert.equal(styles.length, 1, 'the bundle injected its stylesheet')
+    await run()
+  } finally {
+    env.restore()
+  }
+}
+
+test('a table header never wraps, so a wide grid cannot squeeze it to one character per line', async () => {
+  await withStyles(() => {
+    // The shared cell rule wraps everything; the later header rule wins for th,
+    // which puts the header's full width into the table's minimum width. Eight
+    // columns then overflow the scroll box instead of compressing one char wide.
+    const headers = declarationsFor('.clipchat-card__table th')
+    const wrap = headers.findIndex((style) => style.whiteSpace === 'pre-wrap')
+    const nowrap = headers.map((style) => style.whiteSpace).lastIndexOf('nowrap')
+    assert.ok(wrap >= 0, 'the shared th/td rule still wraps by default')
+    assert.ok(nowrap > wrap, 'a later header rule keeps the header on one line')
+  })
+})
+
+test('a table still fills the card and a long cell still wraps', async () => {
+  await withStyles(() => {
+    const table = declarationsFor('.clipchat-card__table').at(-1)
+    assert.equal(table.width, '100%', 'a narrow table stretches to the card')
+    assert.equal(table.tableLayout, 'auto', 'columns keep their natural widths')
+    const cells = declarationsFor('.clipchat-card__table td').at(-1)
+    assert.equal(cells.whiteSpace, 'pre-wrap', 'a long cell wraps instead of running on')
+    // The scroll box absorbs a grid wider than the card; the card never grows.
+    assert.equal(declarationsFor('.clipchat-card__tablewrap').at(-1).overflowX, 'auto')
+  })
+})
+
 test('a code block renders as one literal pre, with its language when it has one', async () => {
   const t = await helpers()
   const nodes = t.answerView('```js\nconst a = 1\n```')
