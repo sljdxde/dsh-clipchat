@@ -77,7 +77,24 @@ window.__ModuleLoader__.load({
       title: '滑词对话',
       close: '关闭',
       placeholder: '直接问，或选一个快问',
+      placeholderWithFiles: '已附加内容，可补充问题，或直接发送',
       inputHint: 'Enter 发送，Shift+Enter 换行',
+      attach: '添加图片或文件',
+      attachTooMany: '最多 {max} 个附件',
+      attachTooLarge: '{name} 超过 {max}，已跳过',
+      attachTotalTooLarge: '附件合计超过 {max}，已跳过',
+      attachReadFailed: '附件读取失败，请重试',
+      dropHint: '松开以添加附件',
+      snippetTitle: '粘贴的文本',
+      snippetMeta: '{lines} 行 · {chars} 字',
+      snippetTruncated: '已截断',
+      snippetTooMany: '最多 {max} 段粘贴文本',
+      removeAttachment: '移除',
+      jumpEnd: '跳到回答末尾',
+      jumpStart: '回到提问',
+      jumpPick: '跳到哪一轮',
+      jumpTurn: '第 {n} 轮',
+      jumpRounds: '共 {n} 轮',
       dragHint: '拖动标题栏移动卡片。方向键移动，Alt+方向键改大小，Home 复位',
       resizeHint: '拖动调整卡片大小',
       empty: '（未读到选段）',
@@ -168,7 +185,24 @@ window.__ModuleLoader__.load({
       title: 'Clipchat',
       close: 'Close',
       placeholder: 'Ask, or pick a quick question',
+      placeholderWithFiles: 'Attached — add a question, or send as is',
       inputHint: 'Enter to send, Shift+Enter for a new line',
+      attach: 'Add images or files',
+      attachTooMany: 'At most {max} attachments',
+      attachTooLarge: '{name} is over {max} and was skipped',
+      attachTotalTooLarge: 'Total attachments exceed {max}; skipped',
+      attachReadFailed: 'Could not read the attachment. Try again.',
+      dropHint: 'Drop to attach',
+      snippetTitle: 'Pasted text',
+      snippetMeta: '{lines} lines · {chars} chars',
+      snippetTruncated: 'truncated',
+      snippetTooMany: 'At most {max} pasted snippets',
+      removeAttachment: 'Remove',
+      jumpEnd: 'Jump to the end',
+      jumpStart: 'Back to the question',
+      jumpPick: 'Jump to a round',
+      jumpTurn: 'Round {n}',
+      jumpRounds: '{n} rounds',
       dragHint: 'Drag the title bar to move the card. Arrow keys move, Alt+arrows resize, Home resets',
       resizeHint: 'Drag to resize the card',
       empty: '(no selected text)',
@@ -321,7 +355,8 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
    by the rail's width puts the scrollbar to the left of it. The 10px taken off
    the right padding gives the inset back, so the text keeps its 16px gap to the
    card's edge — the same gap the records panel has when it replaces the thread. */
-.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;padding:12px 6px 12px 16px;margin-right:10px}
+.clipchat-card__threadwrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.clipchat-card__thread{flex:1;min-height:96px;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;padding:12px 6px 12px 16px;margin-right:10px}
 /* A card whose height the user pinned gives space to the footer first: the
    thread keeps at least a line, then scrolls, instead of pushing the footer out. */
 .clipchat-card.is-sized .clipchat-card__thread{min-height:0}
@@ -332,8 +367,13 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card__empty-sub{font-size:12px;line-height:1.5;opacity:.55}
 .clipchat-card__turn{padding:2px 0 18px}
 .clipchat-card__turn+.clipchat-card__turn{border-top:1px solid var(--dsw-alias-border-l3);padding-top:16px}
-.clipchat-card__q{display:flex;gap:7px;align-items:baseline;font-size:12.5px;font-weight:600;line-height:1.55;white-space:pre-wrap;margin-bottom:10px;padding:7px 10px;border-radius:9px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-primary)}
-.clipchat-card__q::before{content:'问';flex:none;font-size:10.5px;font-weight:500;line-height:1.9;opacity:.45}
+.clipchat-card__q{position:relative;display:block;font-size:12.5px;font-weight:600;line-height:1.55;margin-bottom:10px;padding:7px 10px 7px 27px;border-radius:9px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-primary)}
+.clipchat-card__q::before{content:'问';position:absolute;left:9px;top:7px;font-size:10.5px;font-weight:500;line-height:1.9;opacity:.45}
+.clipchat-card__qtext{white-space:pre-wrap;overflow-wrap:anywhere}
+.clipchat-card__q .clipchat-card__tray{margin-top:7px;font-weight:400}
+.clipchat-card__q .clipchat-card__fchip,.clipchat-card__q .clipchat-card__thumb{height:36px}
+.clipchat-card__q .clipchat-card__thumb,.clipchat-card__q .clipchat-card__thumb-img{width:36px}
+.clipchat-card__qsnippets{display:flex;flex-direction:column;gap:6px;margin-top:7px;font-weight:400}
 .clipchat-card__a{position:relative;line-height:1.75;font-size:13.5px;word-break:break-word;padding-left:14px;border-left:2px solid color-mix(in srgb, var(--dsw-alias-state-success-primary,#1f9d63) 30%, transparent)}
 .clipchat-card__a>.clipchat-card__p{margin:0;white-space:pre-wrap}
 .clipchat-card__a>.clipchat-card__p+.clipchat-card__p{margin-top:9px}
@@ -377,15 +417,89 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-card__copy{border:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11px;line-height:1.4;cursor:pointer;border-radius:999px;padding:1px 8px;transition:background .12s ease,color .12s ease}
 .clipchat-card__copy:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-hover)}
 .clipchat-card:focus{outline:none}
+.clipchat-card__drop{position:absolute;inset:6px;z-index:9;display:grid;place-items:center;border:1.5px dashed var(--dsw-alias-state-success-primary,#1f9d63);border-radius:11px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 86%,var(--dsw-alias-state-success-primary,#1f9d63) 6%);color:var(--dsw-alias-label-primary);font-size:12.5px;pointer-events:none}
+.clipchat-card__lightbox{position:absolute;inset:0;z-index:30;display:grid;place-items:center;padding:24px;border-radius:14px;background:color-mix(in srgb,var(--dsw-alias-label-primary,#000) 66%,transparent);cursor:zoom-out}
+.clipchat-card__lightbox img{max-width:100%;max-height:100%;border-radius:10px}
 .clipchat-card__cursor{display:inline-block;margin-left:1px;animation:clipchat-blink 1s step-end infinite}
 @keyframes clipchat-blink{50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.clipchat-card__cursor{animation:none}}
-.clipchat-card__composer{display:flex;gap:8px;align-items:flex-end;padding:8px 16px;border-top:1px solid var(--dsw-alias-border-l3);background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent)}
-.clipchat-card__ta{flex:1;min-width:0;box-sizing:border-box;resize:none;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:transparent;color:inherit;font:inherit;font-size:13.5px;line-height:1.5;padding:8px 10px;min-height:36px;max-height:140px;overflow:auto;transition:border-color .12s ease,box-shadow .12s ease}
-.clipchat-card__ta:focus{outline:none;border-color:color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 50%, var(--dsw-alias-border-l3));box-shadow:0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary,#2f6fed) 12%, transparent)}
-.clipchat-card__send{flex:none;width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));font:inherit;font-size:15px;cursor:pointer;border-radius:10px;padding:0;transition:opacity .12s ease,transform .12s ease,background .12s ease}
+/* One surface: attachments and pasted text sit above, the field below, and the
+   plus is a quiet control inside the field's left gutter. */
+.clipchat-card__composer{display:flex;flex-direction:column;gap:6px;padding:8px 16px 10px;border-top:1px solid var(--dsw-alias-border-l3)}
+.clipchat-card__ctx{display:flex;flex-direction:column;gap:6px}
+.clipchat-card__row{display:flex;align-items:flex-end;gap:8px}
+.clipchat-card__field{position:relative;flex:1;min-width:0;border:1px solid var(--dsw-alias-border-l3);border-radius:12px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 72%,transparent);transition:border-color .14s ease,box-shadow .14s ease,background .14s ease}
+.clipchat-card__field:hover{border-color:color-mix(in srgb,var(--dsw-alias-label-secondary,#666) 30%,var(--dsw-alias-border-l3))}
+.clipchat-card__field:focus-within{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#1f9d63) 44%,var(--dsw-alias-border-l3));box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-success-primary,#1f9d63) 9%,transparent);background:var(--dsw-alias-bg-elevated,#fff)}
+.clipchat-card__attach{position:absolute;left:9px;top:50%;transform:translateY(-50%);z-index:2;width:26px;height:26px;display:grid;place-items:center;padding:0;border:1px solid transparent;border-radius:50%;background:transparent;color:var(--dsw-alias-label-secondary,#666);cursor:pointer;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.clipchat-card__attach:hover{background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l3)}
+.clipchat-card__attach:active{transform:translateY(-50%) scale(.94)}
+.clipchat-card__attach svg{display:block}
+.clipchat-card__ta-wrap{position:relative;padding:10px 14px 10px 46px}
+/* Capped at three rows: the text above is still there, so the top edge fades
+   instead of ending on a hard cut. */
+.clipchat-card__ta-wrap:has(.clipchat-card__ta.is-capped)::before{content:'';position:absolute;left:46px;right:14px;top:10px;height:12px;pointer-events:none;background:linear-gradient(var(--dsw-alias-bg-elevated,#fff),transparent)}
+.clipchat-card__ta{display:block;width:100%;height:20px;min-height:20px;max-height:60px;padding:0;box-sizing:border-box;resize:none;border:0;background:transparent;color:inherit;font:inherit;font-size:13.5px;line-height:20px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color .14s ease}
+.clipchat-card__field:hover .clipchat-card__ta{scrollbar-color:color-mix(in srgb,var(--dsw-alias-label-secondary,#666) 34%,transparent) transparent}
+.clipchat-card__ta::placeholder{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,#999))}
+.clipchat-card__ta:focus{outline:none}
+.clipchat-card__ta::-webkit-scrollbar{width:8px}
+.clipchat-card__ta::-webkit-scrollbar-track{background:transparent}
+.clipchat-card__ta::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;background-clip:content-box}
+.clipchat-card__field:hover .clipchat-card__ta::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dsw-alias-label-secondary,#666) 34%,transparent);background-clip:content-box}
+.clipchat-card__send{flex:none;width:34px;height:34px;margin-bottom:3px;display:grid;place-items:center;border:1px solid transparent;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill));font:inherit;font-size:15px;cursor:pointer;border-radius:50%;padding:0;transition:opacity .12s ease,transform .12s ease,background .12s ease}
 .clipchat-card__send:hover:not(:disabled){transform:translateY(-1px)}
-.clipchat-card__send:disabled{background:transparent;color:var(--dsw-alias-label-primary);opacity:.45;cursor:default}
+.clipchat-card__send:disabled{background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.12));color:var(--dsw-alias-label-secondary,#666);opacity:1;cursor:default}
+.clipchat-card__tray{display:flex;flex-wrap:wrap;gap:6px}
+.clipchat-card__thumb{position:relative;width:40px;height:40px;flex:none}
+.clipchat-card__thumb-img{width:40px;height:40px;padding:0;border:1px solid var(--dsw-alias-border-l3);border-radius:8px;overflow:hidden;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.08));cursor:zoom-in}
+.clipchat-card__thumb-img img{display:block;width:100%;height:100%;object-fit:cover}
+.clipchat-card__thumb-x{position:absolute;top:-5px;right:-5px;width:16px;height:16px;display:grid;place-items:center;border:1px solid var(--dsw-alias-border-l3);border-radius:50%;background:var(--dsw-alias-bg-elevated,#fff);color:var(--dsw-alias-label-secondary,#666);font-size:10px;line-height:1;cursor:pointer;padding:0;opacity:0;transition:opacity .12s ease,color .12s ease}
+.clipchat-card__thumb:hover .clipchat-card__thumb-x,.clipchat-card__thumb-x:focus-visible{opacity:1}
+.clipchat-card__thumb-x:hover{color:var(--dsw-alias-state-error-primary,#d33)}
+.clipchat-card__fchip{display:flex;align-items:center;gap:6px;max-width:220px;height:40px;padding:0 6px 0 5px;border:1px solid var(--dsw-alias-border-l3);border-radius:8px;background:var(--dsw-alias-bg-elevated,#fff)}
+.clipchat-card__fext{flex:none;width:24px;height:26px;display:grid;place-items:center;border-radius:5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1));color:var(--dsw-alias-label-secondary,#666);font:600 8px/1 inherit;letter-spacing:.02em;text-transform:uppercase}
+.clipchat-card__fmeta{min-width:0;display:flex;flex-direction:column;line-height:1.35}
+.clipchat-card__fname{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--dsw-alias-label-primary)}
+.clipchat-card__fsize{font-size:10px;color:var(--dsw-alias-label-secondary,#888);font-variant-numeric:tabular-nums}
+.clipchat-card__fx{flex:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#888);cursor:pointer;font-size:13px;padding:2px 3px;border-radius:5px}
+.clipchat-card__fx:hover{background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1));color:var(--dsw-alias-label-primary)}
+.clipchat-card__snippet{border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:var(--dsw-alias-bg-elevated,#fff);overflow:hidden}
+.clipchat-card__snippet-head{display:flex;align-items:center;gap:7px;padding:5px 9px;border-bottom:1px solid var(--dsw-alias-border-l3)}
+.clipchat-card__snippet-mark{flex:none;width:18px;height:18px;display:grid;place-items:center;border-radius:5px;background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1));color:var(--dsw-alias-label-secondary,#666);font-size:9.5px;font-weight:600}
+.clipchat-card__snippet-title{font-size:11.5px;font-weight:500;color:var(--dsw-alias-label-primary)}
+.clipchat-card__snippet-meta{font-size:10.5px;color:var(--dsw-alias-label-secondary,#888);font-variant-numeric:tabular-nums}
+.clipchat-card__snippet-spacer{flex:1}
+.clipchat-card__snippet-actions{display:flex;align-items:center;gap:2px}
+.clipchat-card__snippet-btn{border:0;background:transparent;color:var(--dsw-alias-label-secondary,#666);font-size:10.5px;cursor:pointer;padding:2px 4px;border-radius:4px}
+.clipchat-card__snippet-btn:hover{background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1))}
+.clipchat-card__snippet-body{position:relative;max-height:38px;overflow:hidden}
+.clipchat-card__snippet-body pre{margin:0;padding:7px 10px 8px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:11.5px;line-height:1.65;color:var(--dsw-alias-label-secondary,#666)}
+.clipchat-card__snippet.is-open .clipchat-card__snippet-body{max-height:190px;overflow:auto}
+.clipchat-card__snippet--view>summary{list-style:none;cursor:pointer}
+.clipchat-card__snippet--view>summary::-webkit-details-marker{display:none}
+.clipchat-card__snippet--view>summary .clipchat-card__snippet-btn{pointer-events:none}
+.clipchat-card__snippet--view .clipchat-card__snippet-body{display:none}
+.clipchat-card__snippet--view[open] .clipchat-card__snippet-body{display:block;max-height:190px;overflow:auto}
+.clipchat-card__snippet--view .clipchat-card__snippet-btn::after{content:' ▾'}
+.clipchat-card__snippet--view[open] .clipchat-card__snippet-btn::after{content:' ▴'}
+/* The jump control lives in its own row under the thread: it never covers a
+   line of the answer, and the row only exists while there is somewhere to go. */
+.clipchat-card__jumpbar{flex:none;position:relative;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 14px 4px;min-height:24px}
+.clipchat-card__jumphint{margin-right:auto;font-size:10.5px;line-height:1.4;color:var(--dsw-alias-label-secondary,#888);opacity:.75;font-variant-numeric:tabular-nums}
+.clipchat-card__jumpsplit{display:flex;align-items:stretch;border:1px solid var(--dsw-alias-border-l3);border-radius:999px;overflow:hidden;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 70%,transparent)}
+.clipchat-card__jump{border:0;border-radius:0;padding:2px 9px;background:transparent;color:var(--dsw-alias-label-secondary,#666);font:inherit;font-size:11px;line-height:1.6;cursor:pointer}
+.clipchat-card__jumpcaret{border:0;border-left:1px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary,#666);padding:0 7px;font-size:9px;line-height:1;cursor:pointer}
+.clipchat-card__jumpsplit:hover .clipchat-card__jump,.clipchat-card__jumpsplit:hover .clipchat-card__jumpcaret{color:var(--dsw-alias-label-primary)}
+.clipchat-card__jump:hover{color:var(--dsw-alias-label-primary)}
+.clipchat-card__jumpmenu{position:absolute;right:14px;bottom:calc(100% + 4px);z-index:4;width:252px;max-height:246px;overflow:auto;display:flex;flex-direction:column;gap:1px;padding:5px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 88%,transparent);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 10px 26px -8px rgba(0,0,0,.22),0 24px 48px -20px rgba(0,0,0,.3)}
+.clipchat-card__jumphead{padding:4px 7px 5px;font-size:10px;color:var(--dsw-alias-label-secondary,#888)}
+.clipchat-card__jumpitem{display:flex;align-items:baseline;gap:8px;width:100%;border:0;background:transparent;color:inherit;text-align:left;padding:6px 7px;border-radius:6px;font:inherit;font-size:11.5px;cursor:pointer}
+.clipchat-card__jumpitem:hover{background:var(--dsw-alias-bg-sunken,rgba(127,127,127,.1))}
+.clipchat-card__jumpitem.is-end{margin-top:3px;border-top:1px solid var(--dsw-alias-border-l3);border-radius:0 0 6px 6px;padding-top:8px}
+.clipchat-card__jumpindex{flex:none;color:var(--dsw-alias-label-secondary,#888);font-variant-numeric:tabular-nums}
+.clipchat-card__jumptext{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 .clipchat-strip{position:relative;display:flex;align-items:center;box-sizing:border-box;margin:0 16px 2px;padding:0 7px 0 9px;height:30px;min-height:30px;line-height:1;border:1px solid transparent;border-radius:8px;transition:background .16s ease,border-color .16s ease}
 .clipchat-strip__title{display:flex;align-items:center;gap:6px;flex:none;cursor:pointer;border-radius:5px;outline-offset:1px}
 .clipchat-strip:hover{border-color:var(--dsw-alias-border-l3)}
@@ -428,7 +542,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-strip.is-on .clipchat-strip__foot b{color:var(--dsw-alias-state-success-primary,#1f9d63)}
 .clipchat-strip.is-degraded .clipchat-strip__foot b{color:#b0741c}
 @media (prefers-reduced-motion:reduce){.clipchat-strip__detail{transition:none}}
-.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:6px;padding:0 16px 12px;min-width:0;background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent);border-radius:0 0 14px 14px}
+.clipchat-card__footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:6px;padding:7px 16px 12px;min-width:0;background:color-mix(in srgb,var(--dsw-alias-bg-sunken,rgba(127,127,127,.05)) 55%,transparent);border-radius:0 0 14px 14px}
 .clipchat-card__footer>*{flex:none}
 .clipchat-card__footer .clipchat-card__spacer{flex:1 1 0;min-width:4px}
 .clipchat-card__modelwrap{position:relative;flex:0 1 auto;min-width:0;display:flex}
@@ -966,6 +1080,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     /** Stored records of the loaded session, keyed by id. */
     const records = new Map()
     let nextRecordId = 1
+    let nextComposerId = 1
     let loadedSessionId = null
     let loadToken = 0
     let sessionTimer
@@ -1132,6 +1247,15 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       return `r${Date.now().toString(36)}${(nextRecordId++).toString(36)}`
     }
 
+    /**
+     * A short id for one composer item (a folded paste or an attachment).
+     * @param {string} prefix - one letter naming the kind of item.
+     * @returns {string} an id unique within this page.
+     */
+    function newComposerId(prefix) {
+      return `${prefix}${Date.now().toString(36)}${(nextComposerId++).toString(36)}`
+    }
+
     function isRecordText(value) {
       return typeof value === 'string' && value.trim().length > 0
     }
@@ -1150,6 +1274,33 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const output = pick(value.output, value.outputTokens)
       if (input === null || output === null || input < 0 || output < 0) return null
       return { input, output }
+    }
+
+    /**
+     * Add two usage pairs; null on either side counts as zero.
+     * @param {{ input: number, output: number } | null} a - first usage.
+     * @param {{ input: number, output: number } | null} b - second usage.
+     * @returns {{ input: number, output: number } | null} sum, or null when both are missing.
+     */
+    function addUsage(a, b) {
+      if (a === null && b === null) return null
+      return {
+        input: (a?.input ?? 0) + (b?.input ?? 0),
+        output: (a?.output ?? 0) + (b?.output ?? 0),
+      }
+    }
+
+    /**
+     * Usage shown on a card opened from a stored record: the sum of every round
+     * in it, not just the newest one.
+     * @param {{ turns?: Array<{ usage?: unknown }> } | null} record - recalled record.
+     * @returns {{ input: number, output: number } | null} total usage or null.
+     */
+    function initialTokensOf(record) {
+      const turns = Array.isArray(record?.turns) ? record.turns : []
+      let total = null
+      for (const turn of turns) total = addUsage(total, normalizeUsage(turn?.usage))
+      return total
     }
 
     /** Validate one stored turn, keeping only the fields worth persisting. */
@@ -2156,6 +2307,9 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         case 'body-too-large': return translate('contextTooLong')
         case 'invalid-model': return translate('invalidModel')
         case 'empty-answer': return translate('emptyAnswer')
+        case 'attachment-too-many':
+        case 'attachment-too-large':
+        case 'attachment-unreadable': return translate('attachReadFailed')
         default: return typeof payload?.message === 'string' && payload.message.length > 0
           ? payload.message
           : translate('failed')
@@ -2643,39 +2797,202 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       }).join('\n\n')
     }
 
-    /**
-     * One-line summary of a Q&A for the main composer, capped at 200 chars.
-     * Newlines are folded to spaces: the composer already separates blocks, and
-     * an inserted line break reads as an accidental blank line.
-     */
-    function summarizeAnswer(question, answer, limit = 200) {
-      const oneLine = (value) => value.replace(/\s*\n+\s*/gu, ' ').trim()
-      const q = typeof question === 'string' ? oneLine(question) : ''
-      const a = typeof answer === 'string' ? oneLine(answer) : ''
-      if (a.length === 0) return ''
-      const prefix = q.length > 0 ? `问题：${q} ` : ''
-      const full = `${prefix}回答：${a}`
-      if (full.length <= limit) return full
-      const room = Math.max(0, limit - prefix.length - '回答：'.length - 1)
-      return `${prefix}回答：${a.slice(0, room)}…`
-    }
+    /** Ceiling for one "back to main" insertion; keeps a runaway answer bounded. */
+    const INSERT_MAX_CHARS = 20000
 
     /**
-     * Payload for inserting a passage quote plus its Q&A summary into the main
-     * composer. The text never starts or ends with a newline: the composer
-     * already provides the separation, and a leading blank line reads as a bug.
+     * Payload for inserting a passage quote plus the complete Q&A into the main
+     * composer.
+     *
+     * The whole answer is inserted: the old 200-character summary silently
+     * dropped everything past the first sentence, which was the bug. Newlines
+     * and list markers are preserved so the inserted text keeps the shape the
+     * reader saw. Only an answer past `INSERT_MAX_CHARS` is cut, and then it
+     * says so.
+     *
      * @param {string} passage - quoted text.
-     * @param {string} question - the question to summarise.
-     * @param {string} answer - the answer to summarise.
+     * @param {string} question - the question that produced the answer.
+     * @param {string} answer - the full answer text.
      * @returns {{ text: string, plain: string } | null} payload, or null when empty.
      */
     function insertPayloadOf(passage, question, answer) {
-      const summary = summarizeAnswer(question, answer)
-      if (summary.length === 0) return null
+      const q = typeof question === 'string' ? question.trim() : ''
+      const a = typeof answer === 'string' ? answer.trim() : ''
+      if (a.length === 0) return null
+      const body = [q.length > 0 ? `问：${q}` : '', `答：${a}`].filter((part) => part.length > 0).join('\n\n')
+      const text = body.length > INSERT_MAX_CHARS
+        ? `〔滑词〕\n${body.slice(0, INSERT_MAX_CHARS)}\n…（已截断，完整回答请在卡片里复制）`
+        : `〔滑词〕\n${body}`
       return {
-        text: `〔滑词〕${summary}`.trim(),
-        plain: `> ${passage}\n\n〔滑词〕${summary}`.trim(),
+        text: text.trim(),
+        plain: `> ${passage}\n\n${text}`.trim(),
       }
+    }
+
+    /** Rows a pasted block may occupy before it becomes a text snippet. */
+    const PASTE_MAX_LINES = 3
+    /** Characters that fold a single-line paste even when it would not wrap much. */
+    const PASTE_MAX_CHARS = 240
+    /** Hard cap for one snippet, so a huge paste cannot lock the card. */
+    const SNIPPET_MAX_CHARS = 20000
+    /** Snippets one question may carry, so the composer list stays bounded. */
+    const SNIPPET_MAX_COUNT = 6
+    /** Attachments one question may carry. Mirrors `ATTACH_LIMITS` in lib/attachments.js. */
+    const ATTACH_MAX_FILES = 6
+    /** Bytes per attachment, before base64 expansion. Mirrors the host cap. */
+    const ATTACH_MAX_BYTES = 4 * 1024 * 1024
+    /** Combined bytes across one question. Mirrors `ATTACH_LIMITS.maxTotalBytes`. */
+    const ATTACH_MAX_TOTAL_BYTES = 6 * 1024 * 1024
+    /** Raster types the host stores as images. Mirrors `IMAGE_TYPES` there. */
+    const IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+    /**
+     * Count the visual rows a paste occupies at the composer's width.
+     *
+     * Wrapping is a layout fact, so this measures a detached probe with the same
+     * font, width and `pre-wrap` behaviour as the textarea. Without a layout
+     * engine (unit tests) it degrades to counting source line breaks.
+     *
+     * @param {string} text - text to measure.
+     * @param {number} [widthPx] - available text width; 0 falls back to line breaks.
+     * @param {number} [lineHeightPx] - line height used by the composer.
+     * @param {string | null} [font] - the composer's computed `font` shorthand; the
+     *   probe must measure with the font the textarea actually uses, or a host
+     *   with its own typeface mis-judges how many rows a paste takes.
+     * @returns {number} row count, at least 1 for non-empty text.
+     */
+    function visualLineCount(text, widthPx, lineHeightPx = 20, font = null) {
+      const value = typeof text === 'string' ? text : ''
+      if (value.length === 0) return 0
+      const byBreaks = value.split(/\r?\n/u).length
+      if (!Number.isFinite(widthPx) || widthPx <= 0
+        || typeof document === 'undefined' || typeof document.createElement !== 'function' || !document.body) {
+        return byBreaks
+      }
+      const probe = document.createElement('div')
+      probe.setAttribute('aria-hidden', 'true')
+      const shorthand = typeof font === 'string' && font.length > 0
+        ? font
+        : `400 13.5px/${lineHeightPx}px sans-serif`
+      probe.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;pointer-events:none;'
+        + `width:${Math.round(widthPx)}px;white-space:pre-wrap;word-break:break-word;`
+        + `font:${shorthand}`
+      probe.textContent = value
+      document.body.appendChild(probe)
+      const height = probe.scrollHeight
+      probe.remove()
+      if (!Number.isFinite(height) || height <= 0) return byBreaks
+      return Math.max(1, Math.round(height / lineHeightPx))
+    }
+
+    /**
+     * Whether a paste should become a text snippet instead of filling the box.
+     *
+     * Two separate triggers, because either one alone reads badly: more than
+     * three visual rows makes the box jump, and a single 300-character line is
+     * just as unreadable even though it only occupies one row.
+     *
+     * @param {string} text - pasted text.
+     * @param {number} [widthPx] - composer text width; omitted counts source lines.
+     * @param {string | null} [font] - the composer's computed `font` shorthand.
+     * @returns {boolean} true when the text should be folded.
+     */
+    function shouldFoldPaste(text, widthPx, font = null) {
+      const value = typeof text === 'string' ? text : ''
+      if (value.trim().length === 0) return false
+      if (value.length > PASTE_MAX_CHARS) return true
+      return visualLineCount(value, widthPx, 20, font) > PASTE_MAX_LINES
+    }
+
+    /**
+     * Whether one drag event carries files (not a text selection or a link).
+     * @param {object} event - drag event or React synthetic event.
+     * @returns {boolean} true when files are being dragged.
+     */
+    function hasFilePayload(event) {
+      const types = event?.dataTransfer?.types
+      if (types === null || types === undefined) return false
+      if (typeof types.includes === 'function') return types.includes('Files')
+      return Array.from(types).includes('Files')
+    }
+
+    /** Uppercase extension label for a file chip. */
+    function fileExtOf(name) {
+      const match = /^(.*)\.([A-Za-z0-9]{1,8})$/u.exec(typeof name === 'string' ? name : '')
+      return match === null ? 'FILE' : match[2].toUpperCase()
+    }
+
+    /** Human byte size. */
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes) || bytes < 0) return '—'
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+    }
+
+    /** Media type a file will be sent as; browsers leave some files blank. */
+    function mediaTypeOf(file) {
+      if (typeof file?.type === 'string' && file.type.length > 0) return file.type
+      const ext = fileExtOf(file?.name).toLowerCase()
+      if (ext === 'png') return 'image/png'
+      if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+      if (ext === 'gif') return 'image/gif'
+      if (ext === 'webp') return 'image/webp'
+      return 'application/octet-stream'
+    }
+
+    /** Whether one file is a raster image the composer can preview. */
+    function isImageFile(file) {
+      return IMAGE_MEDIA_TYPES.includes(mediaTypeOf(file))
+    }
+
+    /**
+     * Read one file as canonical base64, without the data-URL prefix.
+     *
+     * Bytes first, when the blob can give them: `readAsDataURL` builds the whole
+     * base64 string once as a data URL and then builds a second copy to strip the
+     * prefix, and at a 4 MB attachment that is a few megabytes of extra heap for
+     * nothing. `FileReader` stays as the fallback for runtimes whose blobs have
+     * no `arrayBuffer`.
+     *
+     * @param {File|Blob} file - picked or dropped file.
+     * @returns {Promise<string>} base64 payload.
+     */
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        if (typeof file?.arrayBuffer === 'function') {
+          file.arrayBuffer().then((buffer) => resolve(base64OfBytes(new Uint8Array(buffer))), reject)
+          return
+        }
+        if (typeof FileReader === 'function') {
+          const reader = new FileReader()
+          reader.onerror = () => reject(reader.error ?? new Error('read-failed'))
+          reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : ''
+            const comma = result.indexOf(',')
+            resolve(comma >= 0 ? result.slice(comma + 1) : result)
+          }
+          reader.readAsDataURL(file)
+          return
+        }
+        reject(new Error('no-file-reader'))
+      })
+    }
+
+    /** Base64 for bytes when no FileReader exists (tests, older runtimes). */
+    function base64OfBytes(bytes) {
+      if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64')
+      if (typeof btoa !== 'function') throw new Error('no-base64')
+      // Encode in 3-byte-aligned windows: each `btoa` then adds no padding, so
+      // the pieces concatenate into one valid string, and `fromCharCode` is
+      // called once per window instead of once per byte.
+      const windowSize = 8190
+      let encoded = ''
+      for (let start = 0; start < bytes.length; start += windowSize) {
+        const slice = bytes.subarray(start, Math.min(start + windowSize, bytes.length))
+        encoded += btoa(String.fromCharCode.apply(null, slice))
+      }
+      return encoded
     }
 
     /** Build one visible thread turn from its parts. */
@@ -2685,6 +3002,9 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         answer: typeof answer === 'string' ? answer : '',
         streaming: options.streaming === true,
         error: typeof options.error === 'string' ? options.error : '',
+        attachments: Array.isArray(options.attachments) ? options.attachments : [],
+        snippets: Array.isArray(options.snippets) ? options.snippets : [],
+        usage: normalizeUsage(options.usage),
       }
     }
 
@@ -2957,6 +3277,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }))
     }
 
+    /** Node trees of completed answers, keyed by their text; a bounded set. */
+    const answerNodeCache = new Map()
+    /** How many answer trees stay cached. */
+    const ANSWER_CACHE_LIMIT = 8
+
     /**
      * Render one parsed answer as nodes.
      *
@@ -2965,14 +3290,32 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      * inside React's render and would take the answer area with it, so the raw
      * text is a better failure than a blank card.
      *
+     * The card re-renders for every token of a stream and every keystroke in the
+     * composer, but a finished answer never changes. Building its tree once and
+     * reusing the same element objects lets React bail out of those subtrees
+     * instead of re-parsing the whole thread on each frame. A custom parser (only
+     * tests pass one) is never cached, so the fallback stays observable.
+     *
      * @param {unknown} text - answer text.
      * @param {(text: unknown) => Array<object>} [parse] - block parser; a test points it
      *   at a throwing parser to exercise the fallback, which no real input reaches.
      * @returns {Array<object>} nodes.
      */
     function answerView(text, parse = answerBlocks) {
+      const cacheable = parse === answerBlocks
+      const key = typeof text === 'string' ? text : ''
+      if (cacheable) {
+        const hit = answerNodeCache.get(key)
+        if (hit !== undefined) {
+          // Refresh the entry so a long thread keeps the answers it shows.
+          answerNodeCache.delete(key)
+          answerNodeCache.set(key, hit)
+          return hit
+        }
+      }
+      let nodes
       try {
-        return parse(text).map((block, index) => {
+        nodes = parse(text).map((block, index) => {
           const key = `${index}:${block.kind}`
           if (block.kind === 'h') {
             return h(`h${block.level + 2}`, { key, className: 'clipchat-card__h' }, inlineView(block.text, key))
@@ -3001,8 +3344,13 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       } catch {
         // Last resort: the answer stays readable even when the renderer cannot
         // parse it, which is what 0.1.2 did for every answer.
-        return [h('pre', { className: 'clipchat-card__pre' }, typeof text === 'string' ? text : '')]
+        nodes = [h('pre', { className: 'clipchat-card__pre' }, typeof text === 'string' ? text : '')]
       }
+      if (cacheable) {
+        if (answerNodeCache.size >= ANSWER_CACHE_LIMIT) answerNodeCache.delete(answerNodeCache.keys().next().value)
+        answerNodeCache.set(key, nodes)
+      }
+      return nodes
     }
 
     /**
@@ -3026,7 +3374,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         if (entry === null || entry === undefined || entry.role !== 'user') continue
         const next = entries[index + 1]
         const hasAnswer = next !== undefined && next !== null && next.role === 'assistant'
-        turns.push(turnOf(entry.text, hasAnswer ? next.text : ''))
+        turns.push(turnOf(entry.text, hasAnswer ? next.text : '', {
+          attachments: entry.attachments,
+          snippets: entry.snippets,
+          usage: hasAnswer ? next.usage : undefined,
+        }))
         if (hasAnswer) index += 1
       }
       if (current !== null && current !== undefined && typeof current.question === 'string' && current.question.length > 0) {
@@ -3186,11 +3538,23 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       // in the input box as if it were still unsent.
       const [draft, setDraft] = React.useState('')
       const [answer, setAnswer] = React.useState('')
-      const [tokens, setTokens] = React.useState(null)
+      // A recalled record already carries the usage of its newest turn; seeding
+      // the footer from it is what stops a reopened card from saying "token —".
+      // `tokens` is the running total of every completed round in this card;
+      // `liveTokens` is the one still streaming, added in for display only.
+      const [tokens, setTokens] = React.useState(() => initialTokensOf(loadedRecord))
+      const [liveTokens, setLiveTokens] = React.useState(null)
+      // The usage of the round that just finished, so re-keeping the answer
+      // stores that round's numbers instead of the card's running total.
+      const [answeredUsage, setAnsweredUsage] = React.useState(null)
       const [error, setError] = React.useState('')
       const [streaming, setStreaming] = React.useState(false)
       const [asked, setAsked] = React.useState(null)
+      const [askedFiles, setAskedFiles] = React.useState([])
+      const [askedSnippets, setAskedSnippets] = React.useState([])
       const [history, setHistory] = React.useState([])
+      /** Latest committed history, so an append can tell which turn fell off. */
+      const historyRef = React.useRef([])
       const [highlighted, setHighlighted] = React.useState(() => anchor !== null && anchor !== undefined && hasHighlight(nodeKey, selection, anchor))
       const [model, setModel] = React.useState(() => storedModelOf(nodeKey, selection))
       const [modelList, setModelList] = React.useState([])
@@ -3215,6 +3579,22 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const [detailDigest, setDetailDigest] = React.useState(null)
       const [detailState, setDetailState] = React.useState('idle')
       const [detailOpen, setDetailOpen] = React.useState(false)
+      // Composer extras: folded pastes and files travel with the next question.
+      const [snippets, setSnippets] = React.useState([])
+      const [files, setFiles] = React.useState([])
+      /** Mirror of `files`, so adding or removing never has to guess the list. */
+      const filesRef = React.useRef([])
+      const [dragOver, setDragOver] = React.useState(false)
+      const [attachError, setAttachError] = React.useState('')
+      const [preview, setPreview] = React.useState(null)
+      const attachInputRef = React.useRef(null)
+      const createdUrlsRef = React.useRef(new Set())
+      const sendingRef = React.useRef(false)
+      const lastTurnRef = React.useRef(null)
+      /** Pending frame that measures the jump control, so a fling measures once. */
+      const jumpRafRef = React.useRef(null)
+      const [jumpMode, setJumpMode] = React.useState(null)
+      const [jumpOpen, setJumpOpen] = React.useState(false)
       const [, bumpRecords] = React.useState(0)
 
       // Card geometry. A gesture paints the live box straight onto the DOM and
@@ -3677,11 +4057,56 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
       }, [detail, sessionId])
 
-      // Keep the newest turn in view while the answer grows.
+      // The box shows one to three rows and grows with the draft, never past
+      // three: past that the text scrolls inside the box instead of the card
+      // growing without bound.
+      React.useEffect(() => {
+        const ta = textareaRef.current
+        if (ta === null || ta === undefined) return
+        ta.style.height = 'auto'
+        const natural = Math.max(20, ta.scrollHeight || 20)
+        const capped = natural > 60
+        ta.style.height = `${Math.min(natural, 60)}px`
+        ta.classList.toggle('is-capped', capped)
+        if (capped && ta.selectionStart === ta.value.length) ta.scrollTop = ta.scrollHeight
+      }, [draft])
+
+      // A new question anchors to the top of the thread. A fresh turn is shorter
+      // than the viewport, so reserve the missing height for the duration of the
+      // answer: the question stays put while the answer grows into that space.
+      React.useEffect(() => {
+        if (asked === null) return
+        const thread = threadRef.current
+        const last = lastTurnRef.current
+        if (thread === null || thread === undefined || last === null || last === undefined) return
+        const reserve = Math.max(0, thread.clientHeight - last.offsetHeight + 24)
+        thread.style.paddingBottom = reserve > 0 ? `${reserve}px` : ''
+        thread.scrollTop = Math.max(0, last.offsetTop - 2)
+      }, [asked])
+
+      // Releasing the reserved tail when the answer settles shows a short answer
+      // in full and leaves a long one exactly where the reader left it. No
+      // scroll write here: that is the whole point of the change.
       React.useEffect(() => {
         const thread = threadRef.current
-        if (thread !== null && thread !== undefined) thread.scrollTop = thread.scrollHeight
-      }, [answer, streaming, history])
+        if (thread === null || thread === undefined) return
+        if (streaming) return
+        thread.style.paddingBottom = ''
+        // Every surface that mounts the card (browser, jsdom) has rAF; the frame
+        // makes the measurement happen after the answer's layout has settled.
+        requestAnimationFrame(refreshJump)
+      }, [streaming, answer, history])
+
+      // Preview URLs are owned by this card; release them when it closes.
+      React.useEffect(() => () => {
+        if (jumpRafRef.current !== null && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(jumpRafRef.current)
+        }
+        jumpRafRef.current = null
+        if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return
+        for (const url of createdUrlsRef.current) URL.revokeObjectURL(url)
+        createdUrlsRef.current.clear()
+      }, [])
 
       // Close the model menu on outside click; Esc closes the menu, not the card.
       React.useEffect(() => {
@@ -3705,12 +4130,24 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
       }, [modelMenuOpen])
 
+      // Close the round picker on an outside press.
+      React.useEffect(() => {
+        if (!jumpOpen || typeof document === 'undefined') return undefined
+        const close = (event) => {
+          const target = event.target
+          if (target instanceof Element && target.closest('.clipchat-card__jumpmenu, .clipchat-card__jumpbar') !== null) return
+          setJumpOpen(false)
+        }
+        document.addEventListener('pointerdown', close, true)
+        return () => document.removeEventListener('pointerdown', close, true)
+      }, [jumpOpen])
+
       /**
        * Ask one question and render the streamed answer.
        * @param {object} request - assembled request.
        * @param {number} requestId - monotonic id guarding stale updates.
        */
-      const ask = async (request, requestId, signal) => {
+      const ask = async (request, requestId, signal, display = { question: '', files: [], snippets: [] }) => {
         const current = () => aliveRef.current && requestIdRef.current === requestId
         try {
           const response = await fetch(ASK_PATH, {
@@ -3766,7 +4203,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
                   input: seen.inputTokens ?? seen.input ?? 0,
                   output: seen.outputTokens ?? seen.output ?? 0,
                 }
-                if (current()) setTokens(usage)
+                if (current()) setLiveTokens(usage)
               } else if (frame.type === 'error') {
                 failed = true
                 // The code, not the host's wording, decides what the card says:
@@ -3788,11 +4225,18 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             // Keeping the answer is the default; the 记录 button turns into its
             // cancel affordance so a throwaway question can still be dropped.
             setSavedRecordId(keepAnswer(request.question, text, usage, route))
-            setHistory((previous) => [
-              ...previous,
-              { role: 'user', text: request.question },
-              { role: 'assistant', text },
-            ].slice(-HISTORY_LIMIT))
+            setTokens((previous) => addUsage(previous, normalizeUsage(usage)))
+            setLiveTokens(null)
+            setAnsweredUsage(normalizeUsage(usage))
+            const nextHistory = [
+              ...historyRef.current,
+              { role: 'user', text: display.question, attachments: display.files, snippets: display.snippets },
+              { role: 'assistant', text, usage },
+            ]
+            const trimmed = nextHistory.slice(-HISTORY_LIMIT)
+            revokeDroppedUrls(historyRef.current, trimmed)
+            historyRef.current = trimmed
+            setHistory(trimmed)
           }
         } catch (thrown) {
           if (requestIdRef.current !== requestId) return
@@ -3812,8 +4256,16 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
       }
 
-      const submit = (question) => {
-        if (streaming || question.length === 0) return
+      /**
+       * Ask one question, carrying this turn's files and folded pastes.
+       * @param {string} question - typed question (may be empty when extras exist).
+       * @param {Array<{ kind: string, name: string, mediaType: string, data: string }>} attachments - wire attachments.
+       * @param {Array<object>} displayFiles - files as the question bubble should show them.
+       * @param {Array<object>} snippetList - folded pastes as the bubble should show them.
+       */
+      const submit = (question, attachments = [], displayFiles = [], snippetList = []) => {
+        if (streaming) return
+        if (question.length === 0 && attachments.length === 0 && snippetList.length === 0) return
 
         const chat = { nodes, timeline, locations }
         const node = typeof nodes?.get === 'function' ? nodes.get(nodeKey) : undefined
@@ -3835,12 +4287,25 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         controllerRef.current = controller
         const requestId = ++requestIdRef.current
 
+        // Snippets travel to the model as text; the bubble shows them as
+        // separate blocks so a long paste never masquerades as the question.
+        const composedQuestion = [
+          question,
+          ...snippetList.map((snippet) => `【附加文本】\n${snippet.text}`),
+        ].filter((part) => typeof part === 'string' && part.length > 0).join('\n\n')
+
         setAsked(question)
+        setAskedFiles(displayFiles)
+        setAskedSnippets(snippetList)
         setDraft('')
+        commitFiles([])
+        setSnippets([])
+        setAttachError('')
         setStreaming(true)
         setAnswer('')
         setError('')
-        setTokens(null)
+        setLiveTokens(null)
+        setAnsweredUsage(null)
         setInsertState('idle')
         setAnswered(null)
 
@@ -3852,8 +4317,9 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           recent,
           neighbors,
           history,
-          question,
+          question: composedQuestion,
         }
+        if (attachments.length > 0) request.attachments = attachments
         if (model !== null) request.model = model
         // Detailed mode only changes the request when the digest actually
         // arrived; a failed read falls back to the normal context.
@@ -3861,10 +4327,155 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           request.detail = true
           request.digest = detailDigest.digest
         }
-        void ask(request, requestId, controller.signal)
+        void ask(request, requestId, controller.signal, { question, files: displayFiles, snippets: snippetList })
       }
 
-      const send = () => submit(draft.trim())
+      /**
+       * Encode this turn's files and hand everything to `submit`.
+       *
+       * Encoding is asynchronous (base64), so a second click while it runs is
+       * dropped by the `sending` flag rather than starting a second ask.
+       */
+      const send = async (questionOverride) => {
+        if (streaming || sendingRef.current) return
+        const question = (typeof questionOverride === 'string' ? questionOverride : draft).trim()
+        if (question.length === 0 && files.length === 0 && snippets.length === 0) return
+        sendingRef.current = true
+        try {
+          const wire = []
+          for (const item of files) {
+            wire.push({
+              kind: item.url === null ? 'file' : 'image',
+              name: item.file.name,
+              mediaType: mediaTypeOf(item.file),
+              data: await readFileAsBase64(item.file),
+            })
+          }
+          const displayFiles = files.map((item) => ({
+            id: item.id,
+            name: item.file.name,
+            bytes: item.file.size,
+            url: item.url,
+            image: item.url !== null,
+          }))
+          const snippetList = snippets.map((item) => ({
+            id: item.id,
+            text: item.text,
+            lines: item.text.split('\n').length,
+            chars: item.text.length,
+            truncated: item.truncated === true,
+          }))
+          submit(question, wire, displayFiles, snippetList)
+        } catch (error) {
+          console.warn('dsh-clipchat: attachment could not be read', error)
+          setError(translate('attachReadFailed'))
+        } finally {
+          sendingRef.current = false
+        }
+      }
+
+      /** Release one preview URL this card created, if it is still alive. */
+      const revokeOwnedUrl = (url) => {
+        if (typeof url !== 'string' || url.length === 0) return
+        if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+        createdUrlsRef.current.delete(url)
+      }
+
+      /** Commit the attachment list to the ref and to React in one step. */
+      const commitFiles = (next) => {
+        filesRef.current = next
+        setFiles(next)
+      }
+
+      /**
+       * Release the preview URLs of turns that just fell out of the thread.
+       *
+       * Attachments are shown as object URLs owned by this card. Trimming the
+       * history drops the turn but not its blob, so without this the card keeps
+       * every image it was ever sent alive until it closes.
+       *
+       * @param {Array<object>} previous - history before the append.
+       * @param {Array<object>} next - history after trimming.
+       */
+      const revokeDroppedUrls = (previous, next) => {
+        const kept = new Set(next)
+        for (const entry of previous) {
+          if (kept.has(entry)) continue
+          const items = Array.isArray(entry?.attachments) ? entry.attachments : []
+          for (const item of items) revokeOwnedUrl(item?.url)
+        }
+      }
+
+      /** Folded pastes: appended, capped, removable. */
+      const addSnippet = (raw) => {
+        const value = String(raw ?? '').replace(/\r\n/gu, '\n').trim()
+        if (value.length === 0) return
+        if (snippets.length >= SNIPPET_MAX_COUNT) {
+          setAttachError(fillTemplate(translate('snippetTooMany'), { max: SNIPPET_MAX_COUNT }))
+          return
+        }
+        const truncated = value.length > SNIPPET_MAX_CHARS
+        const stored = truncated ? value.slice(0, SNIPPET_MAX_CHARS) : value
+        // Line count and length are measured once, here: the snippet header
+        // re-renders with every keystroke in the composer.
+        const snippet = {
+          id: newComposerId('s'),
+          text: stored,
+          truncated,
+          lines: stored.split('\n').length,
+          chars: stored.length,
+        }
+        setSnippets((list) => (list.length >= SNIPPET_MAX_COUNT ? list : [...list, snippet]))
+      }
+
+      /** Add files from a picker, a drop, or a paste; refuse what cannot be sent. */
+      const addFiles = (incoming) => {
+        const list = Array.from(incoming ?? [])
+        if (list.length === 0) return
+        // The list is computed here rather than inside the state updater: the
+        // updater must stay pure, and a refusal has to report a message.
+        const next = [...filesRef.current]
+        let message = ''
+        for (const file of list) {
+          if (next.length >= ATTACH_MAX_FILES) {
+            message = fillTemplate(translate('attachTooMany'), { max: ATTACH_MAX_FILES })
+            break
+          }
+          if (Number.isFinite(file.size) && file.size > ATTACH_MAX_BYTES) {
+            message = fillTemplate(translate('attachTooLarge'), {
+              name: file.name,
+              max: formatBytes(ATTACH_MAX_BYTES),
+            })
+            continue
+          }
+          if (next.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) continue
+          const totalAfter = next.reduce((sum, entry) => sum + (Number.isFinite(entry.file.size) ? entry.file.size : 0), 0)
+            + (Number.isFinite(file.size) ? file.size : 0)
+          if (totalAfter > ATTACH_MAX_TOTAL_BYTES) {
+            message = fillTemplate(translate('attachTotalTooLarge'), { max: formatBytes(ATTACH_MAX_TOTAL_BYTES) })
+            continue
+          }
+          const url = isImageFile(file)
+            && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+            ? URL.createObjectURL(file)
+            : null
+          if (url !== null) createdUrlsRef.current.add(url)
+          next.push({
+            id: newComposerId('f'),
+            file,
+            url,
+          })
+        }
+        commitFiles(next)
+        setAttachError(message)
+      }
+
+      /** Remove one attachment; only a preview URL owned here is revoked. */
+      const removeFile = (id) => {
+        const item = filesRef.current.find((entry) => entry.id === id)
+        if (item !== undefined) revokeOwnedUrl(item.url)
+        commitFiles(filesRef.current.filter((entry) => entry.id !== id))
+      }
 
       /** Select one menu entry and persist it on the covering highlight. */
       const chooseModel = (key) => {
@@ -3900,7 +4511,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           answer,
           provider: route?.provider ?? meta?.provider ?? model?.provider,
           model: route?.model ?? meta?.model ?? model?.model,
-          usage: usage ?? tokens ?? undefined,
+          usage: usage ?? undefined,
         })
         if (turn === null) return null
         const entry = recordWithTurn(existing, turn, selection, highlightId ?? undefined)
@@ -3932,7 +4543,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           bumpRecords((value) => value + 1)
           return
         }
-        setSavedRecordId(keepAnswer(answered.question, answered.answer, tokens, meta))
+        setSavedRecordId(keepAnswer(answered.question, answered.answer, answeredUsage, meta))
       }
 
       /**
@@ -4056,9 +4667,10 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
       }
 
-      const tokenLine = tokens === null
+      const totalTokens = addUsage(tokens, liveTokens)
+      const tokenLine = totalTokens === null
         ? null
-        : `${translate('tokensIn')} ${tokens.input} / ${translate('tokensOut')} ${tokens.output}`
+        : `${translate('tokensIn')} ${totalTokens.input} / ${translate('tokensOut')} ${totalTokens.output}`
       const modelChoices = modelChoicesOf(modelList, model)
       const currentModelKey = modelKeyOf(model)
       const currentChoice = modelChoices.find((choice) => choice.key === currentModelKey)
@@ -4066,7 +4678,12 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         ? translate('followModel')
         : currentChoice?.name ?? model?.model ?? currentModelKey
       const recordEntries = recordList()
-      const currentTurn = asked === null ? null : turnOf(asked, answer, { streaming, error })
+      const currentTurn = asked === null ? null : turnOf(asked, answer, {
+        streaming,
+        error,
+        attachments: askedFiles,
+        snippets: askedSnippets,
+      })
       const turns = threadTurns(history, currentTurn, loadedRecord)
       const presetEntries = presetList(translate)
 
@@ -4193,8 +4810,14 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const turnView = (turn, index) => h('div', {
         key: `${index}:${turn.question.slice(0, 12)}`,
         className: 'clipchat-card__turn',
+        ref: index === turns.length - 1 ? lastTurnRef : undefined,
       },
-        h('div', { className: 'clipchat-card__q' }, turn.question),
+        h('div', { className: 'clipchat-card__q' },
+          turn.question.length > 0 ? h('div', { className: 'clipchat-card__qtext' }, turn.question) : null,
+          turn.attachments.length === 0 ? null : h('div', { className: 'clipchat-card__tray' },
+            turn.attachments.map((item) => (item.image ? fileThumbView(item, 'q') : fileChipView(item, 'q')))),
+          turn.snippets.length === 0 ? null : h('div', { className: 'clipchat-card__qsnippets' },
+            turn.snippets.map((snippet) => snippetQuoteView(snippet, 'q')))),
         h('div', { className: 'clipchat-card__a' },
           turn.answer.length > 0
             ? answerView(turn.answer)
@@ -4247,14 +4870,227 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             }, expanded ? translate('collapseAnswer') : translate('expandAnswer'))))
       }
 
+      /* Composer extras: one set of small views shared by the tray and the question bubble. */
+      const fileChipView = (item, keyPrefix) => h('div', { key: `${keyPrefix}${item.id}`, className: 'clipchat-card__fchip' },
+        h('span', { className: 'clipchat-card__fext' }, fileExtOf(item.name)),
+        h('span', { className: 'clipchat-card__fmeta' },
+          h('span', { className: 'clipchat-card__fname', title: item.name }, item.name),
+          h('span', { className: 'clipchat-card__fsize' }, formatBytes(item.bytes))),
+        keyPrefix === 'q' ? null : h('button', {
+          type: 'button',
+          className: 'clipchat-card__fx',
+          'aria-label': `${translate('removeAttachment')} ${item.name}`,
+          onClick: () => removeFile(item.id),
+        }, '×'))
+
+      const fileThumbView = (item, keyPrefix) => h('div', { key: `${keyPrefix}${item.id}`, className: 'clipchat-card__thumb' },
+        h('button', {
+          type: 'button',
+          className: 'clipchat-card__thumb-img',
+          title: item.name,
+          onClick: () => setPreview(item.url),
+        }, h('img', { src: item.url, alt: item.name })),
+        keyPrefix === 'q' ? null : h('button', {
+          type: 'button',
+          className: 'clipchat-card__thumb-x',
+          'aria-label': `${translate('removeAttachment')} ${item.name}`,
+          onClick: () => removeFile(item.id),
+        }, '×'))
+
+      /** Header shared by the editable chip and the read-only bubble card. */
+      const snippetHead = (snippet, right, tag = 'div') => h(tag, { className: 'clipchat-card__snippet-head' },
+        h('span', { className: 'clipchat-card__snippet-mark' }, '文'),
+        h('span', { className: 'clipchat-card__snippet-title' }, translate('snippetTitle')),
+        h('span', { className: 'clipchat-card__snippet-meta' },
+          fillTemplate(translate('snippetMeta'), {
+            lines: snippet.lines ?? snippet.text.split('\n').length,
+            chars: snippet.chars ?? snippet.text.length,
+          }),
+          snippet.truncated === true ? ` · ${translate('snippetTruncated')}` : ''),
+        h('span', { className: 'clipchat-card__snippet-spacer' }),
+        right)
+
+      /** A snippet inside a question bubble: readable, expandable, not removable. */
+      const snippetQuoteView = (snippet, keyPrefix) => h('details', {
+        key: `${keyPrefix}${snippet.id}`,
+        className: 'clipchat-card__snippet clipchat-card__snippet--view',
+      },
+        snippetHead(snippet, h('span', { className: 'clipchat-card__snippet-btn' }, translate('expandAnswer')), 'summary'),
+        h('div', { className: 'clipchat-card__snippet-body' }, h('pre', null, snippet.text)))
+
+      const snippetView = (snippet, keyPrefix, interactive) => h('div', {
+        key: `${keyPrefix}${snippet.id}`,
+        className: `clipchat-card__snippet${interactive === true && snippet.open ? ' is-open' : ''}`,
+      },
+        interactive === true
+          ? snippetHead(snippet, h('span', { className: 'clipchat-card__snippet-actions' },
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__snippet-btn',
+              onClick: () => toggleSnippet(snippet.id),
+            }, snippet.open ? translate('collapseAnswer') : translate('expandAnswer')),
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__snippet-btn',
+              'aria-label': translate('removeAttachment'),
+              onClick: () => discardSnippet(snippet.id),
+            }, '×')))
+          : snippetHead(snippet, null),
+        h('div', { className: 'clipchat-card__snippet-body' }, h('pre', null, snippet.text)))
+
+      /** The tray above the field: images, file chips and folded pastes. */
+      const attachmentContextView = () => h('div', { className: 'clipchat-card__ctx' },
+        files.length === 0 ? null : h('div', { className: 'clipchat-card__tray' },
+          files.map((item) => {
+            const view = { id: item.id, name: item.file.name, bytes: item.file.size, url: item.url }
+            return item.url === null ? fileChipView(view, 't') : fileThumbView(view, 't')
+          })),
+        snippets.map((snippet) => snippetView(snippet, 't', true)))
+
+      const toggleSnippet = (id) => {
+        setSnippets((list) => list.map((item) => (item.id === id ? { ...item, open: item.open !== true } : item)))
+      }
+
+      const discardSnippet = (id) => {
+        setSnippets((list) => list.filter((item) => item.id !== id))
+      }
+
+      /** Paste: images become attachments, a long or wide paste becomes a snippet. */
+      const onPaste = (event) => {
+        const data = event.clipboardData
+        if (data === null || data === undefined) return
+        const items = Array.from(data.items ?? [])
+        const images = items
+          .filter((item) => item.kind === 'file' && String(item.type).startsWith('image/'))
+          .map((item) => item.getAsFile())
+          .filter(Boolean)
+        if (images.length > 0) {
+          event.preventDefault()
+          addFiles(images)
+          return
+        }
+        const text = typeof data.getData === 'function' ? data.getData('text/plain') : ''
+        if (typeof text !== 'string' || text.length === 0) return
+        const field = textareaRef.current
+        const width = field?.clientWidth ?? 0
+        // Measure with the font the field is actually painted in: the probe below
+        // must not guess a typeface the host never uses.
+        const font = field !== null && field !== undefined && typeof getComputedStyle === 'function'
+          ? getComputedStyle(field).font
+          : null
+        if (shouldFoldPaste(text, width, font)) {
+          event.preventDefault()
+          addSnippet(text)
+        }
+      }
+
+      /* --- Jump control: which way to jump, and how to apply it. --- */
+      /** Geometry of the newest turn decides which way the jump points. */
+      const refreshJump = () => {
+        const thread = threadRef.current
+        const last = lastTurnRef.current
+        if (thread === null || thread === undefined || last === null || last === undefined) {
+          setJumpMode(null)
+          return
+        }
+        // The turn markup always has both parts; falling back to the turn's own
+        // box keeps the measurement total instead of guarding a shape that
+        // cannot occur.
+        const bounds = thread.getBoundingClientRect()
+        const q = last.querySelector('.clipchat-card__q')?.getBoundingClientRect() ?? last.getBoundingClientRect()
+        const a = last.querySelector('.clipchat-card__a')?.getBoundingClientRect() ?? last.getBoundingClientRect()
+        if (a.bottom > bounds.bottom - 4) setJumpMode('end')
+        else if (q.bottom < bounds.top + 2) setJumpMode('start')
+        else setJumpMode(null)
+      }
+
+      const onThreadScroll = () => {
+        setJumpOpen(false)
+        // A wheel or a momentum fling fires this at frame rate, and each measure
+        // reads three boxes — which forces layout while a stream is painting.
+        // Measure once for the event, then once after the frame so a commit that
+        // lands mid-scroll cannot leave the button stale. Everything in between
+        // is dropped.
+        if (jumpRafRef.current !== null) return
+        refreshJump()
+        if (typeof requestAnimationFrame !== 'function') return
+        jumpRafRef.current = requestAnimationFrame(() => {
+          jumpRafRef.current = null
+          refreshJump()
+        })
+      }
+
+      /**
+       * Move the thread to a target, then apply it once more on the next frame.
+       *
+       * The second write matters: closing the picker re-renders the card, and a
+       * re-render can let the browser's scroll anchoring nudge scrollTop back.
+       * Writing after the DOM has settled is what makes the jump stick.
+       *
+       * @param {() => number} target - reads the desired scrollTop.
+       */
+      const applyScroll = (target) => {
+        const thread = threadRef.current
+        if (thread === null || thread === undefined) return
+        // A reserved tail from an in-flight answer would be counted as content.
+        thread.style.paddingBottom = ''
+        thread.scrollTop = target()
+        requestAnimationFrame(() => {
+          if (thread.isConnected !== true) return
+          thread.scrollTop = target()
+          refreshJump()
+        })
+      }
+
+      /** Scroll one turn's question to the top of the thread. */
+      const jumpToTurn = (index) => {
+        const thread = threadRef.current
+        if (thread === null || thread === undefined) return
+        applyScroll(() => {
+          const turn = thread.querySelectorAll('.clipchat-card__turn')[index]
+          return turn === null || turn === undefined ? thread.scrollTop : Math.max(0, turn.offsetTop - 2)
+        })
+        setJumpOpen(false)
+      }
+
+      const scrollToJump = (mode) => {
+        const thread = threadRef.current
+        const last = lastTurnRef.current
+        if (thread === null || thread === undefined) return
+        if (mode === 'start' && last !== null && last !== undefined) {
+          applyScroll(() => Math.max(0, last.offsetTop - 2))
+          return
+        }
+        applyScroll(() => thread.scrollHeight)
+      }
+
       const gestureClass = gestureKind === 'move' ? ' is-dragging' : (gestureKind === 'resize' ? ' is-resizing' : '')
       const sizeClass = box.h === null ? '' : ' is-sized'
       return h('div', {
         ref: cardRef,
-        className: `clipchat-card${entering ? ' is-entering' : ''}${recordsOpen ? ' is-records' : ''}${sizeClass}${gestureClass}${settling ? ' is-settling' : ''}`,
+        className: `clipchat-card${entering ? ' is-entering' : ''}${recordsOpen ? ' is-records' : ''}${sizeClass}${gestureClass}${settling ? ' is-settling' : ''}${dragOver ? ' is-dragover' : ''}`,
         style: boxStyleOf(box),
         tabIndex: -1,
         onKeyDown: onCardKeyDown,
+        // Files can be dropped anywhere on the card, not only on the field.
+        onDragOver: (event) => {
+          if (!hasFilePayload(event)) return
+          event.preventDefault()
+          if (event.dataTransfer !== null && event.dataTransfer !== undefined) event.dataTransfer.dropEffect = 'copy'
+          if (!dragOver) setDragOver(true)
+        },
+        onDragLeave: (event) => {
+          if (!hasFilePayload(event)) return
+          const next = event.relatedTarget
+          if (next !== null && next !== undefined && event.currentTarget?.contains?.(next)) return
+          setDragOver(false)
+        },
+        onDrop: (event) => {
+          if (!hasFilePayload(event)) return
+          event.preventDefault()
+          setDragOver(false)
+          addFiles(event.dataTransfer?.files)
+        },
         onMouseDown: (event) => {
           const target = event.target
           // A control keeps its own focus; anything else focuses the card so the
@@ -4338,41 +5174,127 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             className: 'clipchat-card__preset',
             disabled: presetDisabled(streaming, selection),
             onMouseDown: (event) => event.preventDefault(),
-            onClick: () => submit(preset.question),
+            onClick: () => void send(preset.question),
           }, preset.label))),
 
-        h('div', { ref: threadRef, className: 'clipchat-card__thread' },
-          turns.length === 0
-            ? h('div', { className: 'clipchat-card__empty' },
-              h('span', { className: 'clipchat-card__empty-mark' }, '“'),
-              h('div', { className: 'clipchat-card__empty-text' },
-                h('div', { className: 'clipchat-card__empty-title' }, translate('threadHint')),
-                h('div', { className: 'clipchat-card__empty-sub' }, translate('threadHintSub'))))
-            : turns.map(turnView),
-          asked === null && error.length > 0
-            ? h('div', { className: 'clipchat-card__error', role: 'alert' }, error)
-            : null),
+        h('div', { className: 'clipchat-card__threadwrap' },
+          h('div', { ref: threadRef, className: 'clipchat-card__thread', onScroll: onThreadScroll },
+            turns.length === 0
+              ? h('div', { className: 'clipchat-card__empty' },
+                h('span', { className: 'clipchat-card__empty-mark' }, '“'),
+                h('div', { className: 'clipchat-card__empty-text' },
+                  h('div', { className: 'clipchat-card__empty-title' }, translate('threadHint')),
+                  h('div', { className: 'clipchat-card__empty-sub' }, translate('threadHintSub'))))
+              : turns.map(turnView),
+            asked === null && error.length > 0
+              ? h('div', { className: 'clipchat-card__error', role: 'alert' }, error)
+              : null)),
+
+        // The jump control sits in its own row under the thread, so it never
+        // covers a line of the answer. It only exists while there is somewhere
+        // to jump, so it costs no space the rest of the time.
+        recordsOpen || (jumpMode === null && turns.length <= 1) ? null : h('div', { className: 'clipchat-card__jumpbar' },
+          turns.length > 1
+            ? h('span', { className: 'clipchat-card__jumphint' }, fillTemplate(translate('jumpRounds'), { n: turns.length }))
+            : null,
+          h('div', { className: 'clipchat-card__jumpsplit' },
+            jumpMode === null ? null : h('button', {
+              type: 'button',
+              className: 'clipchat-card__jump',
+              onClick: () => scrollToJump(jumpMode),
+            }, jumpMode === 'end' ? `↓ ${translate('jumpEnd')}` : `↑ ${translate('jumpStart')}`),
+            turns.length > 1 ? h('button', {
+              type: 'button',
+              className: 'clipchat-card__jumpcaret',
+              'aria-label': translate('jumpPick'),
+              title: translate('jumpPick'),
+              'aria-haspopup': 'menu',
+              'aria-expanded': jumpOpen,
+              onClick: () => setJumpOpen((open) => !open),
+            }, '▾') : null),
+          jumpOpen && turns.length > 1 ? h('div', {
+            className: 'clipchat-card__jumpmenu',
+            role: 'menu',
+          },
+            h('div', { className: 'clipchat-card__jumphead' }, translate('jumpPick')),
+            turns.map((turn, index) => h('button', {
+              key: `${index}:${turn.question.slice(0, 8)}`,
+              type: 'button',
+              role: 'menuitem',
+              className: 'clipchat-card__jumpitem',
+              onClick: () => jumpToTurn(index),
+            },
+              h('span', { className: 'clipchat-card__jumpindex' }, fillTemplate(translate('jumpTurn'), { n: index + 1 })),
+              h('span', { className: 'clipchat-card__jumptext' }, snippetOf(turn.question, 28) || '—'))),
+            h('button', {
+              type: 'button',
+              role: 'menuitem',
+              className: 'clipchat-card__jumpitem is-end',
+              onClick: () => { setJumpOpen(false); scrollToJump('end') },
+            }, `↓ ${translate('jumpEnd')}`)) : null),
+
+        dragOver
+          ? h('div', { className: 'clipchat-card__drop' }, translate('dropHint'))
+          : null,
+
+        preview === null ? null : h('div', {
+          className: 'clipchat-card__lightbox',
+          onClick: () => setPreview(null),
+        }, h('img', { src: preview, alt: '' })),
 
         h('div', { className: 'clipchat-card__composer' },
-          h('textarea', {
-            ref: textareaRef,
-            className: 'clipchat-card__ta',
-            rows: 1,
-            value: draft,
-            placeholder: translate('placeholder'),
-            title: translate('inputHint'),
-            onChange: (event) => setDraft(event.target.value),
-            onKeyDown,
-          }),
-          h('button', {
-            type: 'button',
-            className: 'clipchat-card__send',
-            'aria-label': streaming ? translate('stop') : translate('send'),
-            title: streaming ? translate('stop') : translate('send'),
-            disabled: streaming ? false : draft.trim().length === 0,
-            onMouseDown: (event) => event.preventDefault(),
-            onClick: streaming ? () => controllerRef.current?.abort() : send,
-          }, streaming ? '■' : '↑')),
+          files.length === 0 && snippets.length === 0 ? null : attachmentContextView(),
+          attachError.length > 0
+            ? h('div', { className: 'clipchat-card__hint', role: 'status' }, attachError)
+            : null,
+          h('div', { className: 'clipchat-card__row' },
+            h('div', { className: 'clipchat-card__field' },
+              h('button', {
+                type: 'button',
+                className: 'clipchat-card__attach',
+                'aria-label': translate('attach'),
+                title: translate('attach'),
+                onMouseDown: (event) => event.preventDefault(),
+                onClick: () => attachInputRef.current?.click(),
+              },
+                h('svg', {
+                  width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none',
+                  stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', 'aria-hidden': 'true',
+                }, h('path', { d: 'M8 3.2v9.6M3.2 8h9.6' }))),
+              h('div', { className: 'clipchat-card__ta-wrap' },
+                h('textarea', {
+                  ref: textareaRef,
+                  className: 'clipchat-card__ta',
+                  rows: 1,
+                  value: draft,
+                  placeholder: files.length > 0 || snippets.length > 0
+                    ? translate('placeholderWithFiles')
+                    : translate('placeholder'),
+                  title: translate('inputHint'),
+                  onChange: (event) => setDraft(event.target.value),
+                  onKeyDown,
+                  onPaste,
+                }))),
+            h('button', {
+              type: 'button',
+              className: 'clipchat-card__send',
+              'aria-label': streaming ? translate('stop') : translate('send'),
+              title: streaming ? translate('stop') : translate('send'),
+              disabled: streaming ? false : (draft.trim().length === 0 && files.length === 0 && snippets.length === 0),
+              onMouseDown: (event) => event.preventDefault(),
+              onClick: streaming ? () => controllerRef.current?.abort() : () => void send(),
+            }, streaming ? '■' : '↑')),
+          h('input', {
+            ref: attachInputRef,
+            type: 'file',
+            multiple: true,
+            style: { display: 'none' },
+            onChange: (event) => {
+              addFiles(event.target.files)
+              event.target.value = ''
+              textareaRef.current?.focus?.()
+            },
+          })),
 
         detailStrip,
 
@@ -4577,6 +5499,8 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       inject: ['slots', 'locale', 'uiConversation'],
       apply,
       __test: {
+        /** The two locale dictionaries, so a parity test can compare them. */
+        dictionaries: { zh, en },
         isAssistantNodeKey,
         nodeKeyOfSelection,
         assistantTextOf,
@@ -4589,8 +5513,19 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         segmentsForSpan,
         anchorFromSelection,
         resolvedSpanAt,
-        summarizeAnswer,
         insertPayloadOf,
+        initialTokensOf,
+        addUsage,
+        IMAGE_MEDIA_TYPES,
+        shouldFoldPaste,
+        visualLineCount,
+        formatBytes,
+        fileExtOf,
+        mediaTypeOf,
+        isImageFile,
+        hasFilePayload,
+        readFileAsBase64,
+        base64OfBytes,
         presetList,
         inlineParts,
         answerBlocks,

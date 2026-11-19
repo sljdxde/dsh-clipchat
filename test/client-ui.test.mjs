@@ -67,7 +67,7 @@ test('threadTurns shows the recalled record alone before any new question', asyn
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
   const turns = plugin.__test.threadTurns([], null, { turns: [{ question: 'old q', answer: 'old a' }] })
-  assert.deepEqual(turns, [{ question: 'old q', answer: 'old a', streaming: false, error: '' }])
+  assert.deepEqual(turns, [{ question: 'old q', answer: 'old a', streaming: false, error: '', attachments: [], snippets: [], usage: null }])
   assert.deepEqual(plugin.__test.threadTurns([], null, null), [])
   // Every turn of a multi-question record shows, oldest first.
   const many = plugin.__test.threadTurns([], null, {
@@ -91,11 +91,26 @@ test('insertPayloadOf never starts or ends with a newline', async () => {
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
   const payload = plugin.__test.insertPayloadOf('passage', 'why?', 'because')
-  assert.ok(payload.text.startsWith('〔滑词〕'), 'summary text starts with the marker')
+  assert.ok(payload.text.startsWith('〔滑词〕'), 'the marker still leads')
   assert.equal(payload.text, payload.text.trim())
   assert.ok(payload.plain.startsWith('> passage'), 'plain fallback starts with the quote')
   assert.equal(payload.plain, payload.plain.trim())
   assert.equal(plugin.__test.insertPayloadOf('passage', 'why?', ''), null)
+})
+
+test('insertPayloadOf carries the whole answer, not a 200-character summary', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const answer = `${'第一段说明。'.repeat(40)}\n\n- 第二段要点\n- 第三段要点\n\n\`\`\`js\nconst x = 1\n\`\`\``
+  const payload = plugin.__test.insertPayloadOf('passage', 'why?', answer)
+  assert.ok(payload.text.includes(answer), 'the complete answer is present')
+  assert.ok(payload.text.length > 250, `length ${payload.text.length}`)
+  assert.ok(payload.text.includes('\n'), 'line breaks survive')
+  assert.ok(payload.text.includes('问：why?'))
+  // Only a runaway answer is cut, and it says so.
+  const huge = plugin.__test.insertPayloadOf('passage', 'q', '答'.repeat(30000))
+  assert.ok(huge.text.length < 21000)
+  assert.ok(huge.text.includes('已截断'))
 })
 
 test('removing a highlight also targets the records kept for that passage', async () => {

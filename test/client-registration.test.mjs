@@ -84,15 +84,18 @@ test('re-anchors a span when block text shifted, else gives up', async () => {
   assert.equal(plugin.__test.resolvedSpanAt('完全不同的文字', span, 'abcdef'), null)
 })
 
-test('summarizes a Q&A for the main composer within 200 chars', async () => {
+test('folding a paste keys on visual rows and on raw length', async () => {
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
-  const s = plugin.__test.summarizeAnswer('这段在讲什么', '讲的是 X。')
-  assert.equal(s, '问题：这段在讲什么 回答：讲的是 X。')
-  assert.ok(!s.includes('\n'), 'the summary never carries a newline')
-  assert.equal(plugin.__test.summarizeAnswer('q', ''), '')
-  assert.equal(plugin.__test.summarizeAnswer('q', 'a'), '问题：q 回答：a')
-  const long = plugin.__test.summarizeAnswer('问题'.repeat(50), '答'.repeat(500))
-  assert.ok(long.length <= 200, `length ${long.length}`)
-  assert.ok(long.endsWith('…'))
+  // No layout engine in jsdom, so rows fall back to source line breaks.
+  assert.equal(plugin.__test.shouldFoldPaste('一行'), false)
+  assert.equal(plugin.__test.shouldFoldPaste('a\nb\nc'), false)
+  assert.equal(plugin.__test.shouldFoldPaste('a\nb\nc\nd'), true)
+  assert.equal(plugin.__test.shouldFoldPaste('x'.repeat(241)), true)
+  assert.equal(plugin.__test.shouldFoldPaste('   '), false)
+  assert.equal(plugin.__test.visualLineCount('a\nb'), 2)
+  assert.equal(plugin.__test.formatBytes(0), '0 B')
+  assert.equal(plugin.__test.formatBytes(2048), '2.0 KB')
+  assert.equal(plugin.__test.fileExtOf('a.tar.gz'), 'GZ')
+  assert.equal(plugin.__test.fileExtOf('noext'), 'FILE')
 })
