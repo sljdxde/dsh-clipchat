@@ -90,27 +90,100 @@ test('recordToggleLabel offers 留痕 until an answer is kept, then 取消留痕
 test('insertPayloadOf never starts or ends with a newline', async () => {
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
-  const payload = plugin.__test.insertPayloadOf('passage', 'why?', 'because')
-  assert.ok(payload.text.startsWith('〔滑词〕'), 'the marker still leads')
-  assert.equal(payload.text, payload.text.trim())
-  assert.ok(payload.plain.startsWith('> passage'), 'plain fallback starts with the quote')
+  const payload = plugin.__test.insertPayloadOf('passage', [{ question: 'why?', answer: 'because' }])
+  assert.ok(payload.quote.startsWith('passage'), 'the passage leads the quote')
+  assert.ok(payload.quote.includes('〔滑词〕'), 'the marker names the thread')
+  assert.equal(payload.quote, payload.quote.trim())
+  assert.ok(payload.plain.startsWith('> passage'), 'the fallback is a blockquote')
   assert.equal(payload.plain, payload.plain.trim())
-  assert.equal(plugin.__test.insertPayloadOf('passage', 'why?', ''), null)
+  // The fallback is blockquoted line by line, the way the host quotes text.
+  assert.ok(payload.plain.split('\n').every((line) => line.startsWith('> ')), 'every line is quoted')
+  assert.equal(plugin.__test.insertPayloadOf('passage', [{ question: 'why?', answer: '' }]), null)
 })
 
 test('insertPayloadOf carries the whole answer, not a 200-character summary', async () => {
   const { definition } = await loadBundle()
   const plugin = definition.factory(() => makeReact())
   const answer = `${'第一段说明。'.repeat(40)}\n\n- 第二段要点\n- 第三段要点\n\n\`\`\`js\nconst x = 1\n\`\`\``
-  const payload = plugin.__test.insertPayloadOf('passage', 'why?', answer)
-  assert.ok(payload.text.includes(answer), 'the complete answer is present')
-  assert.ok(payload.text.length > 250, `length ${payload.text.length}`)
-  assert.ok(payload.text.includes('\n'), 'line breaks survive')
-  assert.ok(payload.text.includes('问：why?'))
-  // Only a runaway answer is cut, and it says so.
-  const huge = plugin.__test.insertPayloadOf('passage', 'q', '答'.repeat(30000))
-  assert.ok(huge.text.length < 21000)
-  assert.ok(huge.text.includes('已截断'))
+  const payload = plugin.__test.insertPayloadOf('passage', [{ question: 'why?', answer }])
+  assert.ok(payload.quote.includes(answer), 'the complete answer is present')
+  assert.ok(payload.quote.length > 250, `length ${payload.quote.length}`)
+  assert.ok(payload.quote.includes('\n'), 'line breaks survive')
+  assert.ok(payload.quote.includes('问：why?'))
+  // What the composer *shows* is the compact summary, not the answer itself.
+  assert.equal(payload.summary.label.includes('第一段说明'), false)
+  assert.ok(payload.summary.body.length <= 61, 'the inline body stays short')
+})
+
+test('insertPayloadOf carries every turn of the thread, oldest first', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const turns = [
+    { question: '第一问', answer: '第一答\n- 要点 A\n- 要点 B' },
+    { question: '第二问', answer: '```js\nconst second = 2\n```' },
+    // A turn that never got an answer must not leave an empty block behind.
+    { question: '第三问', answer: '' },
+    { question: '第四问', answer: '第四答' },
+  ]
+  const payload = plugin.__test.insertPayloadOf('passage', turns)
+  assert.ok(payload.quote.includes('问：第一问'), 'the first question is carried')
+  assert.ok(payload.quote.includes('第一答\n- 要点 A\n- 要点 B'), 'the first answer keeps its shape')
+  assert.ok(payload.quote.includes('问：第二问'), 'the second question is carried')
+  assert.ok(payload.quote.includes('const second = 2'), 'the second answer keeps its code block')
+  assert.ok(payload.quote.includes('问：第四问'), 'the newest question is carried too')
+  assert.equal(payload.quote.includes('问：第三问'), false, 'an unanswered turn is skipped')
+  assert.ok(
+    payload.quote.indexOf('第一问') < payload.quote.indexOf('第二问')
+    && payload.quote.indexOf('第二问') < payload.quote.indexOf('第四问'),
+    'turns stay in order',
+  )
+  // The transcript is not a single-turn payload: it keeps every separator.
+  assert.ok(payload.quote.includes('\n\n---\n\n'), 'rounds are visibly separated')
+  assert.equal(payload.summary.label, '〔滑词〕3 轮问答', 'the chip counts only answered rounds')
+})
+
+test('the composer summary stays small while the quote carries everything', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const payload = plugin.__test.insertPayloadOf('a long selected passage', [
+    { question: '第一问', answer: 'A'.repeat(500) },
+    { question: '第二问', answer: 'B'.repeat(500) },
+  ])
+  assert.equal(payload.summary.label, '〔滑词〕2 轮问答')
+  assert.ok(payload.summary.title.startsWith('选段：'), 'the popover names the selection')
+  assert.ok(payload.summary.detail.includes('2 轮问答'), 'the popover counts the rounds')
+  assert.equal(payload.summary.body, '第二问', 'the chip shows the newest question')
+  assert.ok(
+    payload.summary.label.length + payload.summary.body.length < 60,
+    'what the composer shows stays one small chip',
+  )
+  assert.ok(payload.quote.length > 1000, 'the quote itself still carries both answers')
+})
+
+test('insertPayloadOf cuts only a runaway transcript, and says so', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const huge = plugin.__test.insertPayloadOf('passage', [
+    { question: 'q1', answer: '答'.repeat(12000) },
+    { question: 'q2', answer: '答'.repeat(12000) },
+  ])
+  assert.ok(huge.quote.length < 21000, `length ${huge.quote.length}`)
+  assert.ok(huge.quote.includes('已截断'))
+  assert.ok(huge.quote.includes('passage'))
+  // The blockquote fallback is cut at the same place, never a second time.
+  assert.ok(huge.plain.includes('已截断'))
+})
+
+test('turnsOfResult prefers every stored turn and falls back to the flat pair', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const many = [{ question: 'q1', answer: 'a1' }, { question: 'q2', answer: 'a2' }]
+  assert.deepEqual(plugin.__test.turnsOfResult({ turns: many, question: 'q2', answer: 'a2' }), many)
+  assert.deepEqual(
+    plugin.__test.turnsOfResult({ question: 'old q', answer: 'old a' }),
+    [{ question: 'old q', answer: 'old a' }],
+  )
+  assert.deepEqual(plugin.__test.turnsOfResult(null), [{ question: undefined, answer: undefined }])
 })
 
 test('removing a highlight also targets the records kept for that passage', async () => {

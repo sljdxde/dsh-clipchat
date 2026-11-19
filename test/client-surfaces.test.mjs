@@ -115,6 +115,35 @@ function answerFetch({ digest = null } = {}) {
   }
 }
 
+/** One SSE answer per ask, numbered so two rounds stay distinguishable. */
+function numberedAnswerFetch() {
+  let asked = 0
+  return async (url, init) => {
+    if (!String(url).includes('/dsh-clipchat/ask')) return answerFetch()(url, init)
+    asked += 1
+    const answer = `第 ${asked} 轮回答`
+    const body = [
+      { type: 'meta', provider: 'deepseek', model: 'deepseek-chat' },
+      { type: 'delta', text: answer },
+      { type: 'done' },
+    ].map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join('')
+    const bytes = new TextEncoder().encode(body)
+    let sent = false
+    return {
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { value: undefined, done: true }
+            sent = true
+            return { value: bytes, done: false }
+          },
+        }),
+      },
+    }
+  }
+}
+
 /** Type a question into the composer and press Enter. */
 async function askQuestion(container, question) {
   const textarea = container.querySelector('.clipchat-card__ta')
@@ -483,7 +512,7 @@ test('copying a turn writes the plain answer and shows a confirmation', async ()
 
 /* --- bringing the answer back to the main composer --- */
 
-test('bringing the answer back inserts it through the host input actions', async () => {
+test('bringing the answer back rides one host quote', async () => {
   const calls = []
   globalThis.fetch = answerFetch()
   await withCard(async ({ container }) => {
@@ -497,18 +526,22 @@ test('bringing the answer back inserts it through the host input actions', async
     })
     await flush()
 
-    assert.equal(calls.length, 3, 'the host input actions were used')
+    assert.equal(calls.length, 1, 'the quote action is the only one used')
   }, {
     props: {
       inputActions: {
-        insertQuote: (passage) => { calls.push(['insertQuote', passage]); return true },
+        insertQuote: (text, summary) => { calls.push(['insertQuote', text, summary]); return true },
         captureInsertion: () => { calls.push(['captureInsertion']); return { start: 0, end: 10 } },
-        insertText: (text, span) => { calls.push(['insertText', text, span]); return true },
+        insertText: (text) => { calls.push(['insertText', text]); return true },
       },
     },
   })
-  assert.deepEqual(calls.map((call) => call[0]), ['insertQuote', 'captureInsertion', 'insertText'])
-  assert.equal(calls[0][1], 'selected passage', 'the passage was quoted')
+  assert.deepEqual(calls.map((call) => call[0]), ['insertQuote'])
+  const [text, summary] = [calls[0][1], calls[0][2]]
+  assert.ok(text.startsWith('selected passage'), 'the quote starts with the passage')
+  assert.ok(text.includes('the answer'), 'the quote carries the answer')
+  assert.equal(summary.label, '〔滑词〕问答', 'the composer shows a compact label')
+  assert.ok(summary.body.length < 60, 'the chip body is short')
 })
 
 test('a refused insertion is reported instead of claimed', async () => {
@@ -525,9 +558,35 @@ test('a refused insertion is reported instead of claimed', async () => {
   }, {
     props: {
       inputActions: {
-        insertQuote: () => true,
+        insertQuote: () => false,
         captureInsertion: () => ({ start: 0, end: 10 }),
         insertText: () => false,
+      },
+    },
+  })
+})
+
+test('a refused quote falls back to pre-quoted text', async () => {
+  const inserted = []
+  globalThis.fetch = answerFetch()
+  await withCard(async ({ container }) => {
+    await askQuestion(container, 'my question')
+    await flush(40)
+    await act(async () => {
+      click(footerButton(container, 'backToMain'))
+    })
+    await flush()
+
+    assert.equal(inserted.length, 1, 'the text fallback ran once')
+    assert.ok(inserted[0].startsWith('> selected passage'), 'the fallback is blockquoted')
+    assert.ok(inserted[0].includes('the answer'), 'the fallback still carries the answer')
+    assert.ok(container.textContent.includes('inserted'), 'the card confirms the insertion')
+  }, {
+    props: {
+      inputActions: {
+        insertQuote: () => false,
+        captureInsertion: () => ({ start: 0, end: 10 }),
+        insertText: (text) => { inserted.push(text); return true },
       },
     },
   })
@@ -567,6 +626,121 @@ test('without host input actions the answer is copied instead', async () => {
 
     // No inputActions: the card reports failure rather than pretending.
     assert.ok(container.textContent.includes('insertFailed'))
+  })
+})
+
+test('back to main carries every round of the thread, not only the newest', async () => {
+  const calls = []
+  globalThis.fetch = numberedAnswerFetch()
+  await withCard(async ({ container }) => {
+    await askQuestion(container, 'first question')
+    await flush(40)
+    await askQuestion(container, 'second question')
+    await flush(40)
+    assert.equal(container.querySelectorAll('.clipchat-card__turn').length, 2, 'two rounds are on the card')
+
+    await act(async () => {
+      click(footerButton(container, 'backToMain'))
+    })
+    await flush()
+
+    assert.equal(calls.length, 1, 'one quote carries the whole thread')
+    const [text, summary] = [calls[0][1], calls[0][2]]
+    assert.ok(text.includes('问：first question'), 'the first question is carried')
+    assert.ok(text.includes('第 1 轮回答'), 'the first answer is carried')
+    assert.ok(text.includes('问：second question'), 'the newest question is carried')
+    assert.ok(text.includes('第 2 轮回答'), 'the newest answer is carried')
+    assert.ok(
+      text.indexOf('第 1 轮回答') < text.indexOf('第 2 轮回答'),
+      'rounds stay in order',
+    )
+    assert.equal(summary.label, '〔滑词〕2 轮问答', 'the composer chip counts both rounds')
+    assert.equal(summary.body, 'second question', 'the chip names the newest question')
+    assert.equal(text.length > summary.body.length * 4, true, 'the quote is much larger than the chip')
+  }, {
+    props: {
+      inputActions: {
+        insertQuote: (text, summary) => { calls.push(['insertQuote', text, summary]); return true },
+        captureInsertion: () => { calls.push(['captureInsertion']); return { start: 0, end: 10 } },
+        insertText: (text) => { calls.push(['insertText', text]); return true },
+      },
+    },
+  })
+})
+
+test('back to main on a reopened record carries every stored turn', async () => {
+  const calls = []
+  globalThis.fetch = answerFetch()
+  await withCard(async ({ container }) => {
+    const button = footerButton(container, 'backToMain')
+    assert.ok(button, 'the button rendered for a recalled record')
+    await act(async () => {
+      click(button)
+    })
+    await flush()
+
+    assert.equal(calls.length, 1, 'one quote carries the stored thread')
+    const text = calls[0][1]
+    assert.ok(text.includes('问：older question'), 'the stored older question is carried')
+    assert.ok(text.includes('older answer'), 'the stored older answer is carried')
+    assert.ok(text.includes('问：newer question'), 'the stored newest question is carried')
+    assert.ok(text.includes('newer answer'), 'the stored newest answer is carried')
+    assert.equal(calls[0][2].label, '〔滑词〕2 轮问答')
+  }, {
+    build: (plugin) => {
+      plugin.__test.addRecord({
+        id: 'r-two',
+        highlightId: 'h-two',
+        selection: 'selected passage',
+        turns: [
+          { question: 'older question', answer: 'older answer', provider: 'p', model: 'm', createdAt: 1000 },
+          { question: 'newer question', answer: 'newer answer', provider: 'p', model: 'm', createdAt: 2000 },
+        ],
+        createdAt: 1000,
+        updatedAt: 2000,
+      }, 'session-test')
+      return cardProps({
+        initialHighlightId: 'h-two',
+        inputActions: {
+          insertQuote: (text, summary) => { calls.push(['insertQuote', text, summary]); return true },
+          captureInsertion: () => { calls.push(['captureInsertion']); return { start: 0, end: 10 } },
+          insertText: (text) => { calls.push(['insertText', text]); return true },
+        },
+      })
+    },
+  })
+})
+
+test('a host without quoting inserts the same blockquote as fallback', async () => {
+  const inserted = []
+  globalThis.fetch = numberedAnswerFetch()
+  await withCard(async ({ container }) => {
+    await askQuestion(container, 'first question')
+    await flush(40)
+    await askQuestion(container, 'second question')
+    await flush(40)
+
+    await act(async () => {
+      click(footerButton(container, 'backToMain'))
+    })
+    await flush()
+
+    assert.equal(inserted.length, 1, 'the text fallback ran once')
+    assert.ok(inserted[0].startsWith('> selected passage'), 'the selection is the first quoted line')
+    assert.ok(inserted[0].includes('第 1 轮回答') && inserted[0].includes('第 2 轮回答'), 'both rounds ride the blockquote')
+    assert.ok(
+      inserted[0].split('\n').every((line) => line.startsWith('> ')),
+      'the fallback quotes every line, so the mainline still collapses it',
+    )
+    assert.ok(container.textContent.includes('inserted'), 'the card confirms the insertion')
+  }, {
+    props: {
+      // No insertQuote: only raw text insertion is available.
+      inputActions: {
+        captureInsertion: () => ({ start: 0, end: 10 }),
+        insertText: (text) => { inserted.push(text); return true },
+      },
+    },
   })
 })
 
@@ -845,8 +1019,12 @@ test('a search result can be inserted back into the main composer', async () => 
             sessionId: 'other-session',
             recordId: 'r-other',
             selection: 'a passage from elsewhere',
-            question: 'a question',
-            answer: 'an answer',
+            question: 'a newer question',
+            answer: 'a newer answer',
+            turns: [
+              { question: 'an earlier question', answer: 'an earlier answer' },
+              { question: 'a newer question', answer: 'a newer answer' },
+            ],
             provider: 'deepseek',
             model: 'deepseek-chat',
             createdAt: 1_700_000_000_000,
@@ -873,11 +1051,15 @@ test('a search result can be inserted back into the main composer', async () => 
       click(insert)
     })
     await flush()
-    assert.equal(calls.length, 3, 'the host input actions were used')
+    assert.equal(calls.length, 1, 'one quote carries the result')
+    const text = calls[0][1]
+    assert.ok(text.includes('an earlier answer'), 'the earlier turn is carried')
+    assert.ok(text.includes('a newer answer'), 'the newest turn is carried')
+    assert.equal(calls[0][2].label, '〔滑词〕2 轮问答', 'the chip counts the stored rounds')
   }, {
     props: {
       inputActions: {
-        insertQuote: (passage) => { calls.push(['insertQuote', passage]); return true },
+        insertQuote: (text, summary) => { calls.push(['insertQuote', text, summary]); return true },
         captureInsertion: () => { calls.push(['captureInsertion']); return { start: 0, end: 4 } },
         insertText: (text) => { calls.push(['insertText', text]); return true },
       },

@@ -2801,31 +2801,83 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     const INSERT_MAX_CHARS = 20000
 
     /**
-     * Payload for inserting a passage quote plus the complete Q&A into the main
-     * composer.
+     * One Q&A turn as composer text.
      *
-     * The whole answer is inserted: the old 200-character summary silently
-     * dropped everything past the first sentence, which was the bug. Newlines
-     * and list markers are preserved so the inserted text keeps the shape the
-     * reader saw. Only an answer past `INSERT_MAX_CHARS` is cut, and then it
-     * says so.
+     * Newlines and list markers are preserved so the inserted text keeps the
+     * shape the reader saw; a turn with no answer is skipped by the caller.
+     *
+     * @param {{ question?: unknown, answer?: unknown } | null | undefined} turn - one round.
+     * @returns {string} the turn text, or an empty string when it has no answer.
+     */
+    function insertTurnText(turn) {
+      const q = typeof turn?.question === 'string' ? turn.question.trim() : ''
+      const a = typeof turn?.answer === 'string' ? turn.answer.trim() : ''
+      if (a.length === 0) return ''
+      return [q.length > 0 ? `问：${q}` : '', `答：${a}`].filter((part) => part.length > 0).join('\n\n')
+    }
+
+    /**
+     * Prefix every line with a Markdown blockquote marker.
+     *
+     * This mirrors the host's own quote formatting: the fallback insertion has
+     * to produce the same blockquote the quote action would, so the mainline
+     * still recognizes and collapses it.
+     *
+     * @param {string} text - plain text.
+     * @returns {string} the same text as a blockquote.
+     */
+    function asBlockquote(text) {
+      return String(text).replace(/\r\n?/gu, '\n').split('\n').map((line) => `> ${line}`).join('\n')
+    }
+
+    /**
+     * Payload for sending a passage quote plus every Q&A turn of the thread to
+     * the main composer.
+     *
+     * The payload is shaped like the built-in "引用文本" quote, not like a wall
+     * of pasted text: `quote` is the complete content the message carries (so
+     * the model reads every round), while `summary` is what the composer shows
+     * instead. The transcript keeps each question, its full answer, its line
+     * breaks and its list markers. Only content past `INSERT_MAX_CHARS` is cut,
+     * and then it says so.
      *
      * @param {string} passage - quoted text.
-     * @param {string} question - the question that produced the answer.
-     * @param {string} answer - the full answer text.
-     * @returns {{ text: string, plain: string } | null} payload, or null when empty.
+     * @param {Array<{ question?: unknown, answer?: unknown }>} turns - every round, oldest first.
+     * @returns {{
+     *   quote: string,
+     *   summary: { label: string, title: string, detail: string, body: string },
+     *   plain: string,
+     * } | null} payload, or null when no turn has an answer.
      */
-    function insertPayloadOf(passage, question, answer) {
-      const q = typeof question === 'string' ? question.trim() : ''
-      const a = typeof answer === 'string' ? answer.trim() : ''
-      if (a.length === 0) return null
-      const body = [q.length > 0 ? `问：${q}` : '', `答：${a}`].filter((part) => part.length > 0).join('\n\n')
-      const text = body.length > INSERT_MAX_CHARS
-        ? `〔滑词〕\n${body.slice(0, INSERT_MAX_CHARS)}\n…（已截断，完整回答请在卡片里复制）`
-        : `〔滑词〕\n${body}`
+    function insertPayloadOf(passage, turns) {
+      const bodies = []
+      const questions = []
+      for (const turn of Array.isArray(turns) ? turns : []) {
+        const body = insertTurnText(turn)
+        if (body.length === 0) continue
+        bodies.push(body)
+        questions.push(typeof turn?.question === 'string' ? turn.question.trim() : '')
+      }
+      if (bodies.length === 0) return null
+      const transcript = bodies.join('\n\n---\n\n')
+      const content = `${passage}\n\n〔滑词〕\n${transcript}`
+      const cut = content.length > INSERT_MAX_CHARS
+      const quote = cut
+        ? `${content.slice(0, INSERT_MAX_CHARS)}\n…（已截断，完整回答请在卡片里复制）`
+        : content
+      const count = bodies.length
+      const newestQuestion = questions[questions.length - 1]
       return {
-        text: text.trim(),
-        plain: `> ${passage}\n\n${text}`.trim(),
+        quote: quote.trim(),
+        // What the composer chip reads: rounds and the latest question, never
+        // the whole answer, so the box stays one small quote.
+        summary: {
+          label: `〔滑词〕${count > 1 ? `${count} 轮问答` : '问答'}`,
+          title: `选段：${snippetOf(passage, 120)}`,
+          detail: `${count} 轮问答 · ${transcript.length} 字`,
+          body: snippetOf(newestQuestion, 60) || snippetOf(passage, 60),
+        },
+        plain: asBlockquote(quote),
       }
     }
 
@@ -3395,6 +3447,17 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     /** Stable key for one cross-session search row. */
     function searchKeyOf(item) {
       return `${item.sessionId}:${item.recordId}`
+    }
+
+    /**
+     * Every turn a cross-session result carries; older hosts send one flat pair.
+     * @param {{ question?: string, answer?: string, turns?: Array<object> } | null | undefined} item - result row.
+     * @returns {Array<object>} turns, oldest first.
+     */
+    function turnsOfResult(item) {
+      const turns = Array.isArray(item?.turns) ? item.turns : []
+      if (turns.length > 0) return turns
+      return [{ question: item?.question, answer: item?.answer }]
     }
 
     /** Local date for a result row; `—` when the timestamp is unusable. */
@@ -4547,24 +4610,30 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       }
 
       /**
-       * Insert one passage quote plus its Q&A summary into the main composer.
-       * Shared by the card's own answer and by cross-session search results.
+       * Insert one passage quote plus every turn of a Q&A thread into the main
+       * composer. Shared by the card's own thread and by cross-session results.
        * @param {string} passage - quoted text.
-       * @param {string} question - the question to summarise.
-       * @param {string} answer - the answer to summarise.
+       * @param {Array<{ question: string, answer: string }>} turns - every round, oldest first.
        */
-      const insertIntoMain = (passage, question, answer) => {
-        const payload = insertPayloadOf(passage, question, answer)
+      const insertIntoMain = (passage, turns) => {
+        const payload = insertPayloadOf(passage, turns)
         if (payload === null) return
-        const { text, plain } = payload
+        const { quote, summary, plain } = payload
         try {
           let ok = false
-          if (typeof inputActions?.insertQuote === 'function'
+          if (typeof inputActions?.insertQuote === 'function') {
+            // The built-in "引用文本" shape: one atomic quote carrying the whole
+            // thread. The composer shows `summary`; the sent message carries
+            // `quote`, so the mainline model still reads every round.
+            ok = inputActions.insertQuote(quote, summary)
+          }
+          if (!ok
             && typeof inputActions?.captureInsertion === 'function'
             && typeof inputActions?.insertText === 'function') {
-            const accepted = inputActions.insertQuote(passage)
+            // A host without quoting still gets the content. Inserting it
+            // pre-quoted keeps the mainline rendering it collapsed too.
             const span = inputActions.captureInsertion()
-            ok = inputActions.insertText(accepted ? text : plain, span)
+            ok = inputActions.insertText(plain, span)
           }
           setInsertState(ok ? 'inserted' : 'failed')
         } catch {
@@ -4572,10 +4641,26 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         }
       }
 
-      /** Insert this card's last answer into the main composer. */
+      /**
+       * Every Q&A round the card currently shows, oldest first.
+       * @returns {Array<object>} the visible thread.
+       */
+      const visibleTurns = () => threadTurns(
+        history,
+        asked === null ? null : turnOf(asked, answer, {
+          streaming,
+          error,
+          attachments: askedFiles,
+          snippets: askedSnippets,
+        }),
+        loadedRecord,
+      )
+
+      /** Insert this card's whole thread into the main composer. */
       const backToMain = () => {
-        if (answered === null) return
-        insertIntoMain(selection, answered.question, answered.answer)
+        const turns = visibleTurns()
+        if (turns.length === 0) return
+        insertIntoMain(selection, turns)
       }
 
       /** Delete one record from memory and from the store. */
@@ -4678,13 +4763,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         ? translate('followModel')
         : currentChoice?.name ?? model?.model ?? currentModelKey
       const recordEntries = recordList()
-      const currentTurn = asked === null ? null : turnOf(asked, answer, {
-        streaming,
-        error,
-        attachments: askedFiles,
-        snippets: askedSnippets,
-      })
-      const turns = threadTurns(history, currentTurn, loadedRecord)
+      const turns = visibleTurns()
       const presetEntries = presetList(translate)
 
       /* Detailed mode: one 30px strip, with the injected rows in a hover popup. */
@@ -4861,7 +4940,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             h('button', {
               type: 'button',
               onMouseDown: (event) => event.preventDefault(),
-              onClick: () => insertIntoMain(item.selection, item.question, item.answer),
+              onClick: () => insertIntoMain(item.selection, turnsOfResult(item)),
             }, translate('insertToMain')),
             h('button', {
               type: 'button',
@@ -5514,6 +5593,8 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         anchorFromSelection,
         resolvedSpanAt,
         insertPayloadOf,
+        insertTurnText,
+        turnsOfResult,
         initialTokensOf,
         addUsage,
         IMAGE_MEDIA_TYPES,

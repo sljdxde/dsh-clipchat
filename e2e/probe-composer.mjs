@@ -328,7 +328,9 @@ async function main() {
       report.error = 'the round picker never appeared for two rounds'
     }
 
-    // 5. "back to main" must carry the whole answer, not a 200-character summary
+    // 5. "back to main" rides one atomic quote, the way 引用文本 does: the
+    //    composer shows a compact chip (not the whole thread), while the
+    //    message it sends still carries every round for the mainline model.
     await page.evaluate(() => {
       const button = [...document.querySelectorAll('.clipchat-actions__btn')]
         .find((candidate) => (candidate.textContent ?? '').includes('带回主线'))
@@ -341,12 +343,53 @@ async function main() {
       const field = candidates.at(-1)
       if (field === undefined) return null
       const value = 'value' in field ? field.value : (field.textContent ?? '')
-      return { length: value.length, hasFirst: value.includes('第 1 段'), hasLast: value.includes('第 14 段'), head: value.slice(0, 60) }
+      return {
+        length: value.length,
+        hasQuoteChip: document.querySelector('[data-composer-quote]') !== null,
+        hasRounds: /〔滑词〕2 轮问答/u.test(value),
+        hasNewestQuestion: value.includes('再问一轮'),
+        showsWholeAnswer: value.includes('第 14 段'),
+        head: value.slice(0, 80),
+      }
     })
-    record('back-to-main', mainComposer ?? { missing: true })
-    if (mainComposer === null || mainComposer.hasFirst !== true || mainComposer.hasLast !== true) {
+    record('back-to-main-composer', mainComposer ?? { missing: true })
+    if (mainComposer === null || mainComposer.hasQuoteChip !== true) {
       report.ok = false
-      report.error = 'back to main did not insert the whole answer'
+      report.error = 'back to main did not insert a quote chip'
+    } else if (mainComposer.hasRounds !== true || mainComposer.hasNewestQuestion !== true) {
+      report.ok = false
+      report.error = 'the quote chip did not summarize the thread'
+    } else if (mainComposer.showsWholeAnswer === true || mainComposer.length > 400) {
+      report.ok = false
+      report.error = 'the composer still shows the whole transcript instead of a quote'
+    }
+
+    // Send it: the user message must still carry the full thread (that is what
+    // the mainline model reads), even though the bubble stays collapsed.
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('button')]
+        .find((candidate) => ['发送消息', 'Send message'].includes(candidate.getAttribute('aria-label') ?? ''))
+      button?.click()
+    })
+    await page.waitForFunction(() => {
+      const bubbles = [...document.querySelectorAll('[data-message-bubble]')]
+      const text = bubbles.at(-1)?.textContent ?? ''
+      return text.includes('问：再问一轮')
+    }, { timeout: 30_000, polling: 150 }).catch(() => {})
+    const sentMessage = await page.evaluate(() => {
+      const bubbles = [...document.querySelectorAll('[data-message-bubble]')]
+      const text = bubbles.at(-1)?.textContent ?? ''
+      return {
+        length: text.length,
+        hasFirstRound: text.includes('问：结合这张图说明一下'),
+        hasSecondRound: text.includes('问：再问一轮'),
+        hasLast: text.includes('第 14 段'),
+      }
+    })
+    record('back-to-main-message', sentMessage)
+    if (sentMessage.hasSecondRound !== true || sentMessage.hasLast !== true) {
+      report.ok = false
+      report.error = 'the sent message lost the thread or its answer'
     }
 
     await page.screenshot({ path: join(root, 'composer.png'), fullPage: false })
