@@ -23,6 +23,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { ATTACH_LIMITS, AttachmentInputError, normalizeRequestAttachments, resolveAttachmentBlocks } from './lib/attachments.js'
 import { buildContext, ContextError, LIMITS } from './lib/context.js'
 import { buildDigest, DIGEST_LIMITS, digestStats, renderDigest } from './lib/digest.js'
 import {
@@ -53,6 +54,23 @@ const CONTEXT_READ_TIMEOUT_MS = 1200
  * `context-too-long` once the passage's own context is added.
  */
 const DETAIL_TOTAL_CHARS = DIGEST_LIMITS.totalChars + LIMITS.totalChars
+/**
+ * Body cap for the ask route.
+ *
+ * Larger than the shared 512 KB because one turn may carry up to
+ * `ATTACH_LIMITS.maxTotalBytes` of attachments, which base64 expands by 4/3;
+ * the remainder covers the context, history and JSON envelope.
+ */
+const ASK_BODY_LIMIT = Math.ceil(ATTACH_LIMITS.maxTotalBytes * 4 / 3) + 1024 * 1024
+/**
+ * How many asks may be in flight at once.
+ *
+ * Each ask holds an upstream model call for as long as the user reads the
+ * answer, so the cap protects the host from an unbounded burst. A request over
+ * the cap is refused with 503 instead of waiting: the card is a one-shot ask,
+ * and a queued one would be stale by the time a slot opened.
+ */
+const MAX_CONCURRENT_ASKS = 4
 
 /**
  * Load the host LLM message helpers. A linked local bundle resolves outside
@@ -176,6 +194,9 @@ export function apply(ctx, options = {}) {
     ? createStore()
     : createStore({ root: options.storeRoot })
 
+  /** In-flight ask count; the ask route's concurrency limit reads and holds it. */
+  let activeAsks = 0
+
   /**
    * Best-effort orphan/TTL cleanup. Without a usable complete keep set the
    * sweep is skipped entirely, so an unavailable session list or session corpus
@@ -236,17 +257,17 @@ export function apply(ctx, options = {}) {
     })
   }
 
-  /** `POST /dsh-clipchat/ask`: one streamed, session-free answer. */
-  const handleAsk = async (req, res) => {
-    if (guard(req, res)) return
-    if (req.method !== 'POST') {
-      sendJson(res, 405, { error: 'method-not-allowed' })
-      return
-    }
-
+  /**
+   * One ask, run while a concurrency slot is held: read the body, validate it
+   * and stream the answer.
+   * @param {import('node:http').IncomingMessage} req - the request.
+   * @param {import('node:http').ServerResponse} res - the response.
+   * @returns {Promise<void>} resolves once the response has been ended.
+   */
+  const answerAsk = async (req, res) => {
     let body
     try {
-      body = await readJsonBody(req)
+      body = await readJsonBody(req, ASK_BODY_LIMIT)
     } catch (error) {
       const invalid = error instanceof RequestBodyError
       sendJson(res, invalid && error.code === 'body-too-large' ? 413 : 400, {
@@ -254,14 +275,6 @@ export function apply(ctx, options = {}) {
         message: String(error?.message ?? error),
       })
       return
-    }
-
-    if (typeof body?.sessionId === 'string' && isValidSessionId(body.sessionId)) {
-      try {
-        await store.touch(body.sessionId)
-      } catch {
-        /* Retention is best-effort; the answer still proceeds. */
-      }
     }
 
     if (Array.isArray(body?.history) && body.history.length > LIMITS.historyMessages) {
@@ -304,6 +317,40 @@ export function apply(ctx, options = {}) {
       return
     }
 
+    // Attachments are validated and persisted before the context is built: a
+    // refused upload must not spend an LLM call, and the blocks belong to the
+    // new question only.
+    let attachmentItems
+    try {
+      attachmentItems = normalizeRequestAttachments(body?.attachments)
+    } catch (error) {
+      if (error instanceof AttachmentInputError) {
+        sendJson(res, 400, { error: error.code, message: error.message })
+        return
+      }
+      throw error
+    }
+
+    let attachmentBlocks = []
+    let attachmentNotes = []
+    try {
+      const resolved = await resolveAttachmentBlocks(attachmentItems, ctx.get('attachments'))
+      attachmentBlocks = resolved.blocks
+      attachmentNotes = resolved.notes
+    } catch (error) {
+      sendJson(res, 400, { error: 'attachment-unreadable', message: String(error?.message ?? error) })
+      return
+    }
+
+    const typedQuestion = typeof body?.question === 'string' ? body.question : ''
+    const questionWithNotes = [typedQuestion, ...attachmentNotes]
+      .filter((part) => typeof part === 'string' && part.length > 0)
+      .join('\n\n')
+    // A question that is only an attachment still needs a sentence to act on.
+    const questionText = questionWithNotes.length > 0
+      ? questionWithNotes
+      : (attachmentItems.length > 0 ? '请看附件后回答。' : '')
+
     let built
     try {
       built = buildContext({
@@ -317,7 +364,8 @@ export function apply(ctx, options = {}) {
         totalChars: body?.detail === true ? DETAIL_TOTAL_CHARS : undefined,
         neighbors: body?.neighbors,
         history: body?.history,
-        question: body?.question,
+        question: questionText,
+        attachmentBlocks,
         model,
         createAssistantMessage: helpers.createAssistantMessage,
       })
@@ -327,6 +375,16 @@ export function apply(ctx, options = {}) {
         return
       }
       throw error
+    }
+
+    // Retention is extended only now, once the request is known to reach the
+    // model: a refused body, attachment or context never rewrites a state file.
+    if (typeof body?.sessionId === 'string' && isValidSessionId(body.sessionId)) {
+      try {
+        await store.touch(body.sessionId)
+      } catch {
+        /* Retention is best-effort; the answer still proceeds. */
+      }
     }
 
     // Client disconnect (panel closed, new question, unmount) cancels the call.
@@ -413,6 +471,31 @@ export function apply(ctx, options = {}) {
     } finally {
       res.off('close', onClose)
       if (res.destroyed !== true && res.writableEnded !== true) res.end()
+    }
+  }
+
+  /**
+   * `POST /dsh-clipchat/ask`: one streamed, session-free answer.
+   *
+   * The slot is taken as soon as the request is known to be a valid ask and
+   * released by a single `finally`, so every path below — a refused body, a
+   * failed stream or a normal answer — hands the slot back.
+   */
+  const handleAsk = async (req, res) => {
+    if (guard(req, res)) return
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+    if (activeAsks >= MAX_CONCURRENT_ASKS) {
+      sendJson(res, 503, { error: 'busy', message: '同时进行的提问过多，请稍后再试' })
+      return
+    }
+    activeAsks += 1
+    try {
+      await answerAsk(req, res)
+    } finally {
+      activeAsks -= 1
     }
   }
 

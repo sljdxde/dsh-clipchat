@@ -37,6 +37,9 @@ export function makeRequest({ method = 'POST', url, headers = {}, body } = {}) {
   req.headers = headers
   req.destroyed = false
   req.destroy = () => { req.destroyed = true }
+  // A refused body calls `resume()` to drain the socket; without a socket the
+  // double only records that the request was left draining.
+  req.resume = () => { req.resumed = true }
   if (body !== undefined) {
     setImmediate(() => {
       req.emit('data', Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)))

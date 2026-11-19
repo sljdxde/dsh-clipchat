@@ -30,7 +30,7 @@ const SOURCE_FILES = ['index.js', 'client.js']
  * while running as root, a rename that fails after the temporary file is
  * already written). They are listed so the gap is deliberate and visible.
  */
-const SHIPPED = ['client.js', 'index.js', 'context.js', 'digest.js', 'http.js', 'model.js', 'models.js', 'search.js', 'store.js']
+const SHIPPED = ['client.js', 'index.js', 'attachments.js', 'context.js', 'digest.js', 'http.js', 'model.js', 'models.js', 'search.js', 'store.js']
 
 export const ALLOWED_UNCOVERED = {
   'lib/store.js': {

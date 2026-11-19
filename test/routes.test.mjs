@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -22,7 +22,7 @@ function framesOf(res) {
 }
 
 /** Fake plugin context exposing services by name and a captured webServer. */
-function makeContext({ connection, sessions, defaultSelection, llm, workspaceRegistry, sessionQuery } = {}) {
+function makeContext({ connection, sessions, defaultSelection, llm, workspaceRegistry, sessionQuery, attachments } = {}) {
   const routes = new Map()
   const disposers = []
   const services = {
@@ -31,6 +31,7 @@ function makeContext({ connection, sessions, defaultSelection, llm, workspaceReg
     llm,
     workspaceRegistry,
     sessionQuery,
+    attachments,
     agentDefaultModel: defaultSelection === undefined
       ? undefined
       : { currentSelection: () => defaultSelection },
@@ -452,20 +453,201 @@ test('rejects more than 12 follow-up history messages', async () => {
   assert.equal(llm.calls.length, 0)
 })
 
-test('rejects a body above 512 KB', async () => {
+test('the ask route accepts an attachment-sized body and rejects one past its own cap', async () => {
   const { ctx, routes } = makeContext({
     connection: { requestRejection: () => undefined },
     defaultSelection: { provider: 'p', model: 'm' },
+    llm: scriptedLlm([
+      { type: 'text-delta', text: 'ok' },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]),
+  })
+  apply(ctx)
+
+  // 600 KB used to be refused; attachments need the larger ask cap.
+  const accepted = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({ ...baseBody, padding: 'x'.repeat(600 * 1024) }),
+  }))
+  assert.equal(accepted.status, 200)
+
+  const refused = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({ ...baseBody, padding: 'x'.repeat(9 * 1024 * 1024) }),
+  }))
+  assert.equal(refused.status, 413)
+  assert.equal(JSON.parse(refused.raw).error, 'body-too-large')
+})
+
+test('the ask route turns attachments into content blocks for the new question', async () => {
+  const saved = []
+  const attachments = {
+    async saveImage(input) {
+      saved.push(['image', input.name, input.mediaType])
+      return { attachmentId: 'img-1', mediaType: input.mediaType, bytes: input.data.length, width: 1, height: 1 }
+    },
+    async saveFile(input) {
+      saved.push(['file', input.name])
+      return { attachmentId: 'file-1', name: input.name, bytes: input.data.length }
+    },
+  }
+  const llm = scriptedLlm([
+    { type: 'text-delta', text: 'ok' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+    attachments,
+  })
+  apply(ctx)
+
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64')
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({
+      ...baseBody,
+      question: '这张图和这段有关系吗？',
+      attachments: [
+        { kind: 'image', name: 'shot.png', mediaType: 'image/png', data: png },
+        { kind: 'file', name: 'notes.md', mediaType: 'text/markdown', data: Buffer.from('# hi').toString('base64') },
+      ],
+    }),
+  }))
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(saved.map((entry) => entry[0]), ['image', 'file'])
+  const sent = llm.calls[0].messages.at(-1)
+  assert.equal(sent.role, 'user')
+  assert.equal(sent.content[0].type, 'text')
+  assert.equal(sent.content[0].text, '这张图和这段有关系吗？')
+  assert.equal(sent.content[1].type, 'image')
+  assert.equal(sent.content[1].attachment.attachmentId, 'img-1')
+  assert.equal(sent.content[2].type, 'file')
+  // The context message carries no image: attachments belong to the question.
+  assert.ok(llm.calls[0].messages[0].content.every((block) => block.type === 'text'))
+})
+
+test('without an attachment service the files are named in the question', async () => {
+  const llm = scriptedLlm([
+    { type: 'text-delta', text: 'ok' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
   })
   apply(ctx)
 
   const res = await call(routes.get(ASK_PATH), makeRequest({
     headers: { host: 'h' },
-    body: JSON.stringify({ ...baseBody, padding: 'x'.repeat(600 * 1024) }),
+    body: JSON.stringify({
+      ...baseBody,
+      attachments: [{ kind: 'file', name: 'plan.md', mediaType: 'text/markdown', data: Buffer.from('# plan').toString('base64') }],
+    }),
   }))
+  assert.equal(res.status, 200)
+  const text = llm.calls[0].messages.at(-1).content[0].text
+  assert.match(text, /what does it mean\?/)
+  assert.match(text, /附件：plan\.md/)
+})
 
-  assert.equal(res.status, 413)
-  assert.equal(JSON.parse(res.raw).error, 'body-too-large')
+test('a failing attachment store is reported as a bad attachment', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const attachments = {
+    async saveImage() { throw new Error('disk full') },
+    async saveFile() { throw new Error('disk full') },
+  }
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+    attachments,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({
+      ...baseBody,
+      attachments: [{ kind: 'file', name: 'a.md', mediaType: 'text/markdown', data: 'aGk=' }],
+    }),
+  }))
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'attachment-unreadable')
+  assert.equal(llm.calls.length, 0)
+})
+
+test('a question that is only an attachment still gets a prompt and its blocks', async () => {
+  const attachments = {
+    async saveImage(input) { return { attachmentId: 'img-1', mediaType: input.mediaType, bytes: input.data.length, width: 1, height: 1 } },
+    async saveFile(input) { return { attachmentId: 'file-1', name: input.name, bytes: input.data.length } },
+  }
+  const llm = scriptedLlm([
+    { type: 'text-delta', text: 'ok' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+    attachments,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({
+      ...baseBody,
+      question: '',
+      attachments: [{ kind: 'image', name: 'a.png', mediaType: 'image/png', data: 'iVBORw0KGgo=' }],
+    }),
+  }))
+  assert.equal(res.status, 200)
+  const sent = llm.calls[0].messages.at(-1)
+  assert.equal(sent.content[0].text, '请看附件后回答。')
+  assert.equal(sent.content[1].type, 'image')
+})
+
+test('an attachment whose bytes decode to nothing is refused', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({
+      ...baseBody,
+      attachments: [{ kind: 'file', name: 'empty.bin', mediaType: 'application/octet-stream', data: '!!!' }],
+    }),
+  }))
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'attachment-unreadable')
+  assert.equal(llm.calls.length, 0)
+})
+
+test('a malformed attachment is refused before any model call', async () => {
+  const llm = scriptedLlm([{ type: 'finish', reason: { kind: 'stop' } }])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+  })
+  apply(ctx)
+
+  const res = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: JSON.stringify({ ...baseBody, attachments: 'not-an-array' }),
+  }))
+  assert.equal(res.status, 400)
+  assert.equal(JSON.parse(res.raw).error, 'attachment-unreadable')
+  assert.equal(llm.calls.length, 0)
 })
 
 test('rejects invalid JSON and wrong methods', async () => {
@@ -1040,4 +1222,132 @@ test('the same-origin guard refuses cross-site, malformed and hostless requests'
     'a cross-site fetch is refused')
   assert.equal(sameOriginRejection({ headers: { host: 'h', 'sec-fetch-site': 'same-origin' } }), undefined,
     'a same-origin fetch passes')
+})
+
+test('an over-limit body drops its buffer, detaches its listeners and drains the request', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const req = makeRequest({ headers: { host: 'h' } })
+  // A first chunk is accepted, so there is buffered content to release when the
+  // second one takes the body over the cap.
+  setImmediate(() => {
+    req.emit('data', Buffer.from('{"sessionId":"session-1",'))
+    req.emit('data', Buffer.alloc(9 * 1024 * 1024))
+    req.emit('end')
+  })
+  const res = await call(routes.get(ASK_PATH), req)
+
+  assert.equal(res.status, 413)
+  assert.equal(JSON.parse(res.raw).error, 'body-too-large')
+  assert.equal(req.listenerCount('data'), 0, 'the body listener is gone')
+  assert.equal(req.listenerCount('end'), 0, 'the end listener is gone')
+  assert.equal(req.listenerCount('error'), 0, 'the error listener is gone')
+  assert.equal(req.resumed, true, 'the request keeps draining so the 413 can be delivered')
+})
+
+test('a fifth concurrent ask is refused as busy and a finished ask frees its slot', async () => {
+  const CONCURRENCY = 4
+  const gates = []
+  const llm = {
+    stream() {
+      if (gates.length < CONCURRENCY) {
+        let release
+        const gate = new Promise((resolve) => { release = resolve })
+        gates.push(release)
+        return (async function* generate() {
+          await gate
+          yield { type: 'text-delta', index: 0, text: 'slow answer' }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        })()
+      }
+      return (async function* generate() {
+        yield { type: 'text-delta', index: 0, text: 'fast answer' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      })()
+    },
+  }
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+  })
+  apply(ctx)
+
+  const pending = Array.from({ length: CONCURRENCY }, () => call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: baseBody,
+  })))
+  // Wait until all four asks hold a slot, which happens once the model streams.
+  const deadline = Date.now() + 5000
+  while (gates.length < CONCURRENCY && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  try {
+    assert.equal(gates.length, CONCURRENCY, 'four asks are in flight')
+
+    const refused = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+    assert.equal(refused.status, 503)
+    assert.deepEqual(JSON.parse(refused.raw), {
+      error: 'busy',
+      message: '同时进行的提问过多，请稍后再试',
+    })
+  } finally {
+    // Every in-flight ask ends even if an assertion above failed.
+    for (const release of gates) release()
+    await Promise.all(pending)
+  }
+
+  const after = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+  assert.equal(after.status, 200, 'a finished ask no longer holds a slot')
+  assert.ok(framesOf(after).some((frame) => frame.type === 'done'))
+})
+
+test('a refused ask never touches the session state, a served one extends it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'clipchat-touch-order-'))
+  const before = Date.now() - 60_000
+  await writeFile(join(root, 'session-1.json'), JSON.stringify({
+    version: 1,
+    sessionId: 'session-1',
+    updatedAt: before,
+    highlights: [],
+    records: [],
+  }))
+  const llm = scriptedLlm([
+    { type: 'text-delta', index: 0, text: 'an answer' },
+    { type: 'finish', reason: { kind: 'stop' } },
+  ])
+  const { ctx, routes } = makeContext({
+    connection: { requestRejection: () => undefined },
+    defaultSelection: { provider: 'p', model: 'm' },
+    llm,
+  })
+  apply(ctx, { storeRoot: root })
+
+  const refused = await call(routes.get(ASK_PATH), makeRequest({
+    headers: { host: 'h' },
+    body: { ...baseBody, attachments: [{ kind: 'file', name: 'bad.bin', data: '!!!' }] },
+  }))
+  assert.equal(refused.status, 400)
+  assert.equal(JSON.parse(refused.raw).error, 'attachment-unreadable')
+  const afterRefusal = JSON.parse(await readFile(join(root, 'session-1.json'), 'utf8'))
+  assert.equal(afterRefusal.updatedAt, before, 'a refused ask leaves the state file alone')
+
+  const served = await call(routes.get(ASK_PATH), makeRequest({ headers: { host: 'h' }, body: baseBody }))
+  assert.equal(served.status, 200)
+  const afterServed = JSON.parse(await readFile(join(root, 'session-1.json'), 'utf8'))
+  assert.ok(afterServed.updatedAt > before, 'a served ask still extends retention')
+})
+
+test('a request that errors before its body is read is reported as invalid', async () => {
+  const { ctx, routes } = makeContext({ connection: { requestRejection: () => undefined } })
+  apply(ctx)
+
+  const req = makeRequest({ headers: { host: 'h' } })
+  setImmediate(() => req.emit('error', new Error('socket reset')))
+  const res = await call(routes.get(ASK_PATH), req)
+
+  assert.equal(res.status, 400)
+  assert.deepEqual(JSON.parse(res.raw), { error: 'invalid-request', message: 'socket reset' })
+  assert.equal(req.resumed, true, 'the failed request is left draining')
 })
