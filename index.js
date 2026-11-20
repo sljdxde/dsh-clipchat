@@ -597,14 +597,11 @@ export function apply(ctx, options = {}) {
     }
 
     // A slow or missing log must not hold the ask: the client gives up first.
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), CONTEXT_READ_TIMEOUT_MS)
-    let read
-    try {
-      read = await readSessionEvents(sessionId, controller.signal)
-    } finally {
-      clearTimeout(timer)
-    }
+    // `AbortSignal.timeout` is the declarative form of the old
+    // AbortController + setTimeout pair; readSessionEvents swallows every
+    // error (the timeout included) and returns null, so the degrade path is
+    // unchanged.
+    const read = await readSessionEvents(sessionId, AbortSignal.timeout(CONTEXT_READ_TIMEOUT_MS))
     if (read === null) {
       sendJson(res, 200, { available: false })
       return

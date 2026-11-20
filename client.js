@@ -294,6 +294,12 @@ window.__ModuleLoader__.load({
 .clipchat-menu{display:flex;align-items:center;gap:6px}
 .clipchat-menu__ask{border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-button-floating-fill);color:var(--dsw-alias-label-primary);font:var(--dsw-font-xs-13);cursor:pointer;border-radius:999px;padding:5px 10px}
 .clipchat-menu__ask:hover{background:var(--dsw-alias-button-floating-hover)}
+/* The expanded card is centred in the viewport, not glued to the selected
+   passage. The host anchors its interaction surface to the selection, so a
+   fixed, grid-centred frame is what moves the card to the middle of the screen.
+   The frame is click-through: only the card itself takes the pointer. */
+.clipchat-card-frame{position:fixed;inset:0;display:grid;place-items:center;padding:16px;pointer-events:none;z-index:40}
+.clipchat-card-frame>.clipchat-card{pointer-events:auto}
 .clipchat-card{position:relative;z-index:40;width:min(600px,calc(100vw - 32px));max-height:min(520px,64vh);box-sizing:border-box;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);border-radius:14px;display:flex;flex-direction:column;
 /* Frosted glass: a translucent fill, the page blurred behind it, and a
    brighter top edge so the panel reads as a raised sheet rather than a box. */
@@ -2030,7 +2036,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      */
     function rowsOfRects(rects) {
       const rows = []
-      const sorted = [...rects].sort((a, b) => a.top - b.top || a.left - b.left)
+      const sorted = rects.toSorted((a, b) => a.top - b.top || a.left - b.left)
       for (const rect of sorted) {
         const middle = (rect.top + rect.bottom) / 2
         const row = rows.find((band) => middle > band.bandTop && middle < band.bandBottom)
@@ -2067,7 +2073,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       applying = true
       if (observer !== null) observer.disconnect()
       const layer = layerFor(column)
-      layer.textContent = ''
+      const marks = []
       const columnRect = column.getBoundingClientRect()
       const scaleX = column.offsetWidth === 0 ? 1 : columnRect.width / column.offsetWidth
       const scaleY = column.offsetHeight === 0 ? 1 : columnRect.height / column.offsetHeight
@@ -2101,12 +2107,13 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
               mark.style.top = `${(band.top - columnRect.top) / scaleY - column.clientTop + column.scrollTop}px`
               mark.style.width = `${band.width / scaleX}px`
               mark.style.height = `${band.height / scaleY}px`
-              layer.appendChild(mark)
+              marks.push(mark)
             }
           }
           break
         }
       }
+      layer.replaceChildren(...marks)
       if (observer !== null) observer.observe(document.body, observerOptions)
       applying = false
     }
@@ -2128,8 +2135,18 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       if (observer !== null) return
       observer = new MutationObserver((records) => {
         if (applying) return
-        if (records.every((record) => record.target.nodeType === 1
-          && record.target.closest('.clipchat-layer') !== null)) return
+        // Only a change inside the chat flow can move a highlight. Watching the
+        // whole body also sees every keystroke in the host composer; acting on
+        // those re-ran the full overlay draw (a getClientRects sweep) for
+        // nothing. A record inside our own overlay layer is our own write and
+        // must never schedule another pass.
+        const relevant = records.some((record) => {
+          const element = record.target.nodeType === 1 ? record.target : record.target.parentElement
+          if (element === null || element === undefined || typeof element.closest !== 'function') return false
+          if (element.closest('.clipchat-layer') !== null) return false
+          return element.closest('[data-chat-flow]') !== null
+        })
+        if (!relevant) return
         scheduleSessionCheck()
         scheduleRender()
       })
@@ -3539,7 +3556,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     /** Shown when the host has no writable quote surface (read-only / subagent). */
     function ClipNotice(props) {
       const { dismiss, t } = props
-      return h('div', { className: 'clipchat-card' },
+      return h('div', { className: 'clipchat-card', role: 'dialog', 'aria-label': t('title') },
         h('div', { className: 'clipchat-card__bar' },
           h('span', { className: 'clipchat-card__mark' }, '✦'),
           h('span', { className: 'clipchat-card__bar-text' }, t('title')),
@@ -3658,6 +3675,10 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       const jumpRafRef = React.useRef(null)
       const [jumpMode, setJumpMode] = React.useState(null)
       const [jumpOpen, setJumpOpen] = React.useState(false)
+      const jumpMenuRef = React.useRef(null)
+      const jumpCaretRef = React.useRef(null)
+      const modelMenuRef = React.useRef(null)
+      const modelBtnRef = React.useRef(null)
       const [, bumpRecords] = React.useState(0)
 
       // Card geometry. A gesture paints the live box straight onto the DOM and
@@ -4249,10 +4270,8 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           let failed = false
           let usage = null
           let route = null
-          for (;;) {
-            const { value, done } = await reader.read()
-            if (done === true) break
-            for (const frame of decoder.push(textDecoder.decode(value, { stream: true }))) {
+          const consume = (frames) => {
+            for (const frame of frames) {
               if (frame.type === 'meta') {
                 const seen = normalizeModelRoute({ provider: frame.provider, model: frame.model })
                 if (seen !== null) route = seen
@@ -4278,6 +4297,14 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
               }
             }
           }
+          for (;;) {
+            const { value, done } = await reader.read()
+            if (done === true) break
+            consume(decoder.push(textDecoder.decode(value, { stream: true })))
+          }
+          // Flush the decoder so a multi-byte character split across the last
+          // chunk boundary is not dropped, then drain any frame it completes.
+          consume(decoder.push(textDecoder.decode()))
 
           if (current()) setStreaming(false)
           if (current() && !failed && text.length === 0) setError(translate('failed'))
@@ -5143,13 +5170,54 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         applyScroll(() => thread.scrollHeight)
       }
 
+      /** Arrow keys, Home/End and Escape for a role="menu" popup. */
+      const onMenuKeyDown = (event, close, trigger) => {
+        const items = [...event.currentTarget.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
+        if (items.length === 0) return
+        const index = items.indexOf(event.target)
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          const step = event.key === 'ArrowDown' ? 1 : -1
+          const next = items[(Math.max(index, 0) + step + items.length) % items.length]
+          next.focus()
+        } else if (event.key === 'Home') {
+          event.preventDefault()
+          items[0].focus()
+        } else if (event.key === 'End') {
+          event.preventDefault()
+          items[items.length - 1].focus()
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          close()
+          trigger?.focus?.()
+        }
+      }
+
+      // Opening a menu by click hands focus to its first item, so the arrow
+      // keys drive it without a second Tab.
+      React.useEffect(() => {
+        if (!jumpOpen) return
+        jumpMenuRef.current?.querySelector('[role="menuitem"]')?.focus?.()
+      }, [jumpOpen])
+      React.useEffect(() => {
+        if (!modelMenuOpen) return
+        modelMenuRef.current?.querySelector('[role="menuitemradio"]')?.focus?.()
+      }, [modelMenuOpen])
+
       const gestureClass = gestureKind === 'move' ? ' is-dragging' : (gestureKind === 'resize' ? ' is-resizing' : '')
       const sizeClass = box.h === null ? '' : ' is-sized'
-      return h('div', {
+      return h('div', { className: 'clipchat-card-frame' },
+        h('div', {
         ref: cardRef,
         className: `clipchat-card${entering ? ' is-entering' : ''}${recordsOpen ? ' is-records' : ''}${sizeClass}${gestureClass}${settling ? ' is-settling' : ''}${dragOver ? ' is-dragover' : ''}`,
         style: boxStyleOf(box),
         tabIndex: -1,
+        // The panel floats but is not modal: the page stays interactive, so no
+        // aria-modal and no focus trap. The role and name are what a screen
+        // reader needs to announce what just opened.
+        role: 'dialog',
+        'aria-label': translate('title'),
         onKeyDown: onCardKeyDown,
         // Files can be dropped anywhere on the card, not only on the field.
         onDragOver: (event) => {
@@ -5285,6 +5353,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             turns.length > 1 ? h('button', {
               type: 'button',
               className: 'clipchat-card__jumpcaret',
+              ref: jumpCaretRef,
               'aria-label': translate('jumpPick'),
               title: translate('jumpPick'),
               'aria-haspopup': 'menu',
@@ -5293,7 +5362,9 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             }, '▾') : null),
           jumpOpen && turns.length > 1 ? h('div', {
             className: 'clipchat-card__jumpmenu',
+            ref: jumpMenuRef,
             role: 'menu',
+            onKeyDown: (event) => onMenuKeyDown(event, () => setJumpOpen(false), jumpCaretRef.current),
           },
             h('div', { className: 'clipchat-card__jumphead' }, translate('jumpPick')),
             turns.map((turn, index) => h('button', {
@@ -5382,6 +5453,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             h('button', {
               type: 'button',
               className: 'clipchat-card__modelbtn',
+              ref: modelBtnRef,
               'aria-label': `${translate('model')}: ${modelLabel}`,
               'aria-haspopup': 'menu',
               'aria-expanded': modelMenuOpen,
@@ -5389,7 +5461,12 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
               onClick: () => setModelMenuOpen((open) => !open),
             }, `${modelLabel} ▾`),
             modelMenuOpen
-              ? h('div', { className: 'clipchat-card__modelmenu', role: 'menu' },
+              ? h('div', {
+                className: 'clipchat-card__modelmenu',
+                ref: modelMenuRef,
+                role: 'menu',
+                onKeyDown: (event) => onMenuKeyDown(event, () => setModelMenuOpen(false), modelBtnRef.current),
+              },
                 modelChoices.map((choice) => h('button', {
                   key: choice.key,
                   type: 'button',
@@ -5484,7 +5561,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
             onPointerDown: beginGesture('resize', dir),
           })
         }),
-      )
+      ))
     }
 
     /* Plugin entry. */

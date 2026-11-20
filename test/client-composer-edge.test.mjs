@@ -569,6 +569,17 @@ test('the jump pill opens a round picker and jumps to the chosen question', asyn
     assert.equal(items.length, 3, 'two rounds plus the end action')
     assert.match(items[0].textContent, /第一问/)
 
+    // Arrow keys move focus between items; Home and End jump to the ends.
+    await act(async () => { items[0].focus() })
+    await act(async () => { items[0].dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    assert.equal(globalThis.document.activeElement, items[1], 'ArrowDown moves to the next item')
+    await act(async () => { items[1].dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })) })
+    assert.equal(globalThis.document.activeElement, items[0], 'ArrowUp moves back')
+    await act(async () => { items[0].dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'End', bubbles: true })) })
+    assert.equal(globalThis.document.activeElement, items[items.length - 1], 'End lands on the last item')
+    await act(async () => { items[items.length - 1].dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true })) })
+    assert.equal(globalThis.document.activeElement, items[0], 'Home lands on the first item')
+
     await act(async () => { click(items[0]) })
     await flush(40)
     assert.equal(container.querySelector('.clipchat-card__jumpmenu'), null)
@@ -589,6 +600,12 @@ test('the jump pill opens a round picker and jumps to the chosen question', asyn
     await flush(40)
     assert.equal(container.querySelector('.clipchat-card__jumpmenu'), null)
     assert.equal(thread.scrollTop, thread.scrollHeight)
+
+    // Escape closes the picker from inside it.
+    await act(async () => { click(caret) })
+    const escItem = container.querySelector('.clipchat-card__jumpmenu .clipchat-card__jumpitem')
+    await act(async () => { escItem.dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    assert.equal(container.querySelector('.clipchat-card__jumpmenu'), null, 'Escape closes the picker')
   })
 })
 
