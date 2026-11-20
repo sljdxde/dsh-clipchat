@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,6 +12,34 @@ import { makeRecord } from './helpers/records.mjs'
 const SESSION_PATH = '/dsh-clipchat/session'
 const ASK_PATH = '/dsh-clipchat/ask'
 const HIGHLIGHT_PATH = '/dsh-clipchat/highlight'
+
+/**
+ * Write a throwaway `@deepseek-ai/dsh-llm` install the ask route can resolve.
+ * Without this the route reports `llm-helper-unavailable` on a clean runner
+ * (the host module is only resolvable inside a DSH install), so any ask test
+ * would fail for an unrelated reason. Mirrors test/routes.test.mjs.
+ */
+async function fixtureInstall() {
+  const root = await mkdtemp(join(tmpdir(), 'clipchat-llm-'))
+  const packageDir = join(root, 'node_modules', '@deepseek-ai', 'dsh-llm')
+  await mkdir(packageDir, { recursive: true })
+  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'fixture', private: true }))
+  await writeFile(join(packageDir, 'package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-llm',
+    version: '0.0.0',
+    type: 'module',
+    main: './index.js',
+    exports: { '.': './index.js' },
+  }))
+  await writeFile(join(packageDir, 'index.js'), [
+    'export function createAssistantMessage(input) {',
+    "  return { role: 'assistant', content: input.content, source: { kind: 'model', ...input.source }, id: 'fixture-assistant' }",
+    '}',
+  ].join('\n'))
+  return root
+}
+
+process.env.DSH_INSTALL_DIR = await fixtureInstall()
 
 
 function payloadOf(res) {
