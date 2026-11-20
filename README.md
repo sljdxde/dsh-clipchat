@@ -225,3 +225,11 @@ node e2e/run.mjs --browser-smoke  # prepare 后启动 Chrome、截 about:blank�
 - 从高亮打开卡片需要把选区落到该高亮上（宿主 surface 只能由选区唤起），不抢焦点但仍会改变选区。
 - 卡片打开期间若聊天区被虚拟化替换掉选区节点，宿主可能关闭浮窗。
 - 与隐藏原生引用的插件（如 dsh-sidenote）同时安装时，「问这段」会随引用 surface 一起隐藏。
+
+## 发布
+
+发布走 GitHub Release → GitHub Actions（`.github/workflows/release.yml`），用 npm **Trusted Publishing（OIDC）**，不需要长期 `NPM_TOKEN`：
+
+1. `npm version <patch|minor|major> --no-git-tag-version`，提交并推送 `main`。
+2. 在 npm 包设置里配置 Trusted Publisher（package → Settings → Trusted publishing）：Owner `sljdxde`、Repository `dsh-clipchat`、Workflow `release.yml`、Environment 留空。
+3. 创建并发布对应 tag 的 Release（如 `gh release create v0.3.0 --target main`）。工作流会跑 `npm run check`、`npm pack`，再用 OIDC 执行 `npm publish --provenance`。
