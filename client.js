@@ -2822,6 +2822,25 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     const INSERT_MAX_CHARS = 20000
 
     /**
+     * One run of quoted text: what the reader sees, plus a link's target.
+     *
+     * The quote is what the mainline model reads, so a link keeps its URL after
+     * the label. Dropping it would leave the model unable to follow a reference
+     * the answer made, and the hover preview reads `文档（https://…）` fine.
+     *
+     * @param {string} text - prose text.
+     * @returns {string} the text a reader sees, with link targets spelled out.
+     */
+    function quoteInline(text) {
+      const render = (parts) => parts.map((part) => {
+        const body = part.children === undefined ? part.text : render(part.children)
+        if (part.image === true || part.href === undefined || body === part.href) return body
+        return `${body}（${part.href}）`
+      }).join('')
+      return render(inlineParts(text))
+    }
+
+    /**
      * One answer as plain text for the composer quote.
      *
      * The host shows a quote's text literally — its hover preview does no
@@ -2843,7 +2862,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
       // may wrap, and the inline scan is the only pass that can pair it up.
       const flush = () => {
         if (prose.length === 0) return
-        out.push(plainInline(prose.join('\n')))
+        out.push(quoteInline(prose.join('\n')))
         prose = []
       }
       for (const line of text.replace(/\r\n?/gu, '\n').split('\n')) {

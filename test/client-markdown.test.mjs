@@ -355,7 +355,7 @@ test('a quote keeps its layout and drops only the inline markers', async () => {
   assert.equal(t.quotePlain(source), [
     '主副本怎么定',
     '',
-    '让测试 类级别生效的 @Order 按配置排序，见 文档。',
+    '让测试 类级别生效的 @Order 按配置排序，见 文档（https://a.b）。',
     '',
     '- 要点 A',
     '  - 嵌套 B',
@@ -369,6 +369,21 @@ test('a quote keeps its layout and drops only the inline markers', async () => {
     '# 这不是标题',
     '```',
   ].join('\n'))
+})
+
+test('a quote keeps a link target so the model can follow it', async () => {
+  const t = await helpers()
+  assert.equal(
+    t.quotePlain('看 [文档](https://a.b/c) 和 <https://x.y>。'),
+    '看 文档（https://a.b/c） 和 https://x.y。',
+  )
+  // A label that already is the target is not printed twice.
+  assert.equal(t.quotePlain('[https://a.b](https://a.b)'), 'https://a.b')
+  // An image has no text in the quote: the browser shows a picture, the model
+  // gets its alt text rather than a URL it cannot open.
+  assert.equal(t.quotePlain('![图](https://x.y/i.png)'), '图')
+  // A link inside bold keeps the target after its label.
+  assert.equal(t.quotePlain('**[文档](https://a.b)**'), '文档（https://a.b）')
 })
 
 test('a quote flattens emphasis that wraps across lines', async () => {
