@@ -2818,17 +2818,65 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
     const INSERT_MAX_CHARS = 20000
 
     /**
+     * One answer as plain text for the composer quote.
+     *
+     * The host shows a quote's text literally — its hover preview does no
+     * Markdown pass — so `**类**`, `` `@Order` `` and `###` would reach the
+     * reader as raw markers. The layout is kept exactly as written (blank lines,
+     * list markers, table rows, indentation), a fenced block is left verbatim so
+     * the model can still tell code from prose, and only the inline markup and
+     * heading hashes are dropped.
+     *
+     * @param {string} text - answer text.
+     * @returns {string} the same content with the markers a reader does not need.
+     */
+    function quotePlain(text) {
+      if (typeof text !== 'string' || text.length === 0) return ''
+      const out = []
+      let prose = []
+      let fence = null
+      // Prose is flattened a whole run at a time, not line by line: a bold run
+      // may wrap, and the inline scan is the only pass that can pair it up.
+      const flush = () => {
+        if (prose.length === 0) return
+        out.push(plainInline(prose.join('\n')))
+        prose = []
+      }
+      for (const line of text.replace(/\r\n?/gu, '\n').split('\n')) {
+        const trimmed = line.trim()
+        if (fence !== null) {
+          out.push(line)
+          if (isFenceClose(trimmed, fence)) fence = null
+          continue
+        }
+        const opening = fenceOpening(trimmed)
+        if (opening !== null) {
+          flush()
+          fence = opening
+          out.push(line)
+          continue
+        }
+        const heading = /^(\s{0,3})#{1,6}\s+(.*)$/u.exec(line)
+        prose.push(heading === null ? line : `${heading[1]}${heading[2]}`)
+      }
+      flush()
+      return out.join('\n')
+    }
+
+    /**
      * One Q&A turn as composer text.
      *
      * Newlines and list markers are preserved so the inserted text keeps the
-     * shape the reader saw; a turn with no answer is skipped by the caller.
+     * shape the reader saw; the answer loses its Markdown markers because the
+     * quote that carries it shows plain text. A turn with no answer is skipped
+     * by the caller.
      *
      * @param {{ question?: unknown, answer?: unknown } | null | undefined} turn - one round.
      * @returns {string} the turn text, or an empty string when it has no answer.
      */
     function insertTurnText(turn) {
       const q = typeof turn?.question === 'string' ? turn.question.trim() : ''
-      const a = typeof turn?.answer === 'string' ? turn.answer.trim() : ''
+      const a = typeof turn?.answer === 'string' ? quotePlain(turn.answer.trim()) : ''
       if (a.length === 0) return ''
       return [q.length > 0 ? `问：${q}` : '', `答：${a}`].filter((part) => part.length > 0).join('\n\n')
     }
@@ -2855,8 +2903,9 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
      * of pasted text: `quote` is the complete content the message carries (so
      * the model reads every round), while `summary` is what the composer shows
      * instead. The transcript keeps each question, its full answer, its line
-     * breaks and its list markers. Only content past `INSERT_MAX_CHARS` is cut,
-     * and then it says so.
+     * breaks and its list markers; the answer is flattened to plain text because
+     * the host previews a quote literally. Only content past `INSERT_MAX_CHARS`
+     * is cut, and then it says so.
      *
      * @param {string} passage - quoted text.
      * @param {Array<{ question?: unknown, answer?: unknown }>} turns - every round, oldest first.
@@ -5689,6 +5738,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
         answerBlocks,
         answerView,
         answerPlain,
+        quotePlain,
         threadTurns,
         turnOf,
         presetDisabled,

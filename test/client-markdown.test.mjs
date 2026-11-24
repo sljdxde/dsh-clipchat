@@ -331,6 +331,87 @@ test('the clipboard text of every block kind is the way the reader sees it', asy
   )
 })
 
+/* --- plain text for the composer quote */
+
+test('a quote keeps its layout and drops only the inline markers', async () => {
+  const t = await helpers()
+  const source = [
+    '### 主副本怎么定',
+    '',
+    '让测试 **类**级别生效的 `@Order` 按配置排序，见 [文档](https://a.b)。',
+    '',
+    '- 要点 **A**',
+    '  - 嵌套 `B`',
+    '',
+    '| a | b |',
+    '| --- | --- |',
+    '| **1** | `2` |',
+    '',
+    '```js',
+    'const a = 1 ** 2',
+    '# 这不是标题',
+    '```',
+  ].join('\n')
+  assert.equal(t.quotePlain(source), [
+    '主副本怎么定',
+    '',
+    '让测试 类级别生效的 @Order 按配置排序，见 文档。',
+    '',
+    '- 要点 A',
+    '  - 嵌套 B',
+    '',
+    '| a | b |',
+    '| --- | --- |',
+    '| 1 | 2 |',
+    '',
+    '```js',
+    'const a = 1 ** 2',
+    '# 这不是标题',
+    '```',
+  ].join('\n'))
+})
+
+test('a quote flattens emphasis that wraps across lines', async () => {
+  const t = await helpers()
+  assert.equal(
+    t.quotePlain('**结论：\n- 一\n- 二**\n\n正文 `code`'),
+    '结论：\n- 一\n- 二\n\n正文 code',
+  )
+})
+
+test('a quote keeps a fenced block verbatim, even when streaming leaves it open', async () => {
+  const t = await helpers()
+  const open = ['说明', '```py', 'x = "**原样**" # `tick`'].join('\n')
+  assert.equal(t.quotePlain(open), open)
+  // A closing fence of a different character does not end this block.
+  const mixed = ['```js', 'a', '~~~', 'b', '```'].join('\n')
+  assert.equal(t.quotePlain(mixed), mixed)
+  assert.equal(t.quotePlain(''), '')
+})
+
+test('the carried quote is plain text, but keeps lists, code fences and blank lines', async () => {
+  const { definition } = await loadBundle()
+  const plugin = definition.factory(() => makeReact())
+  const answer = [
+    '不是**必须**的，`@Order` 只影响类内顺序。',
+    '',
+    '- **如果**去掉它',
+    '- 再跑全量测试',
+    '',
+    '```java',
+    '@Order(1)',
+    '```',
+  ].join('\n')
+  const payload = plugin.__test.insertPayloadOf('passage', [{ question: '这个也是必要的吗', answer }])
+  assert.equal(payload.quote.includes('**'), false, 'no bold marker reaches the hover preview')
+  assert.equal(payload.quote.includes('`@Order`'), false, 'no code span marker either')
+  assert.ok(payload.quote.includes('- 如果去掉它'), 'the list marker survives')
+  assert.ok(payload.quote.includes('```java\n@Order(1)\n```'), 'the code block keeps its fences')
+  assert.ok(payload.quote.includes('\n\n'), 'paragraph spacing survives')
+  assert.ok(payload.plain.startsWith('> passage'), 'the fallback is the same text, quoted')
+  assert.ok(payload.plain.includes('> 答：不是必须的，@Order 只影响类内顺序。'))
+})
+
 /* --- inline markup */
 
 test('inline markup covers bold, code, http links, bare labels and strikethrough', async () => {
