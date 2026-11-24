@@ -431,6 +431,7 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 @media (prefers-reduced-motion:reduce){.clipchat-card__cursor{animation:none}}
 /* One surface: attachments and pasted text sit above, the field below, and the
    plus is a quiet control inside the field's left gutter. */
+.clipchat-card__bottom{position:relative;flex:none}
 .clipchat-card__composer{display:flex;flex-direction:column;gap:6px;padding:8px 16px 10px;border-top:1px solid var(--dsw-alias-border-l3)}
 .clipchat-card__ctx{display:flex;flex-direction:column;gap:6px}
 .clipchat-card__row{display:flex;align-items:flex-end;gap:8px}
@@ -530,8 +531,11 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
 .clipchat-strip__more[aria-expanded="true"]::after{transform:rotate(-90deg)}
 .clipchat-strip__label,.clipchat-strip__readout{line-height:1}
 .clipchat-strip__more:hover{opacity:1;background:var(--dsw-alias-button-floating-hover)}
-.clipchat-strip__detail{position:absolute;left:0;bottom:calc(100% + 6px);z-index:4;width:268px;padding:9px 11px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 80%,transparent);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 8px 24px -6px rgba(0,0,0,.18),0 20px 44px -16px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.45);opacity:0;transform:translateY(4px) scale(.99);transform-origin:bottom left;pointer-events:none;transition:opacity .14s ease,transform .14s ease}
-.clipchat-strip:hover .clipchat-strip__detail,.clipchat-strip:focus-within .clipchat-strip__detail,.clipchat-strip__detail.is-pinned{opacity:1;transform:none;pointer-events:auto}
+.clipchat-strip__detail{position:absolute;left:16px;bottom:calc(100% + 6px);z-index:4;width:268px;padding:9px 11px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:color-mix(in srgb,var(--dsw-alias-bg-elevated,#fff) 80%,transparent);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 8px 24px -6px rgba(0,0,0,.18),0 20px 44px -16px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.45);opacity:0;transform:translateY(4px) scale(.99);transform-origin:bottom left;pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+/* The popover is the strip's sibling inside the composer block, so it opens
+   above the input instead of over it and still appears on the strip's hover.
+   It never takes the pointer: it closes as soon as the pointer leaves. */
+.clipchat-card__bottom:has(.clipchat-strip:hover) .clipchat-strip__detail,.clipchat-card__bottom:has(.clipchat-strip:focus-within) .clipchat-strip__detail,.clipchat-strip__detail.is-pinned{opacity:1;transform:none}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.clipchat-strip__detail,.clipchat-card__modelmenu{background:var(--dsw-alias-bg-elevated,var(--dsw-alias-button-floating-fill))}}
 .clipchat-strip__head{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#666);opacity:.7;margin-bottom:5px}
 .clipchat-strip__group+.clipchat-strip__group{margin-top:7px;padding-top:7px;border-top:1px dashed var(--dsw-alias-border-l3)}
@@ -4927,26 +4931,35 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           'aria-expanded': detailOpen,
           onMouseDown: (event) => event.preventDefault(),
           onClick: () => setDetailOpen((open) => !open),
-        }, translate('detailMore')),
-        h('div', {
-          className: `clipchat-strip__detail${detailOpen ? ' is-pinned' : ''}`,
-          role: 'tooltip',
-        },
-          h('div', { className: 'clipchat-strip__head' }, translate('detailHead')),
-          // Rows the base context already carries, then the extra rows only
-          // detailed mode adds. The split is what the switch is actually buying.
-          h('div', { className: 'clipchat-strip__group' },
-            stripRows.rows.filter((row) => row.isNew !== true).map((row) => stripRowOf(row))),
-          stripRows.rows.some((row) => row.isNew === true)
-            ? h('div', { className: 'clipchat-strip__group is-added' },
-              h('div', { className: 'clipchat-strip__grouptag' }, translate('detailAdded')),
-              stripRows.rows.filter((row) => row.isNew === true).map((row) => stripRowOf(row)))
-            : null,
-          h('div', { className: 'clipchat-strip__foot', title: stripNote },
-            fillTemplate(translate('detailTotal'), {
-              chars: `${stripRows.chars.toLocaleString()} 字`,
-              tokens: `≈${(stripRows.tokens / 1000).toFixed(1)}k tok`,
-            }))))
+        }, translate('detailMore')))
+
+      /**
+       * The readout popover, opened above the composer.
+       *
+       * It used to be a child of the strip, which put it over the composer row:
+       * it covered the input and swallowed its click. Anchored to the bottom
+       * block as a sibling, it opens over the thread instead, and the hover that
+       * reveals it is still the strip's.
+       */
+      const detailPopup = h('div', {
+        className: `clipchat-strip__detail${detailOpen ? ' is-pinned' : ''}`,
+        role: 'tooltip',
+      },
+        h('div', { className: 'clipchat-strip__head' }, translate('detailHead')),
+        // Rows the base context already carries, then the extra rows only
+        // detailed mode adds. The split is what the switch is actually buying.
+        h('div', { className: 'clipchat-strip__group' },
+          stripRows.rows.filter((row) => row.isNew !== true).map((row) => stripRowOf(row))),
+        stripRows.rows.some((row) => row.isNew === true)
+          ? h('div', { className: 'clipchat-strip__group is-added' },
+            h('div', { className: 'clipchat-strip__grouptag' }, translate('detailAdded')),
+            stripRows.rows.filter((row) => row.isNew === true).map((row) => stripRowOf(row)))
+          : null,
+        h('div', { className: 'clipchat-strip__foot', title: stripNote },
+          fillTemplate(translate('detailTotal'), {
+            chars: `${stripRows.chars.toLocaleString()} 字`,
+            tokens: `≈${(stripRows.tokens / 1000).toFixed(1)}k tok`,
+          })))
 
       /** Copy one turn's answer; a denied clipboard must not break the card. */
       const copyTurn = async (turn, index) => {
@@ -5441,61 +5454,62 @@ box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.06),0 12px 28px -8px
           onClick: () => setPreview(null),
         }, h('img', { src: preview, alt: '' })),
 
-        h('div', { className: 'clipchat-card__composer' },
-          files.length === 0 && snippets.length === 0 ? null : attachmentContextView(),
-          attachError.length > 0
-            ? h('div', { className: 'clipchat-card__hint', role: 'status' }, attachError)
-            : null,
-          h('div', { className: 'clipchat-card__row' },
-            h('div', { className: 'clipchat-card__field' },
+        h('div', { className: 'clipchat-card__bottom' },
+          h('div', { className: 'clipchat-card__composer' },
+            files.length === 0 && snippets.length === 0 ? null : attachmentContextView(),
+            attachError.length > 0
+              ? h('div', { className: 'clipchat-card__hint', role: 'status' }, attachError)
+              : null,
+            h('div', { className: 'clipchat-card__row' },
+              h('div', { className: 'clipchat-card__field' },
+                h('button', {
+                  type: 'button',
+                  className: 'clipchat-card__attach',
+                  'aria-label': translate('attach'),
+                  title: translate('attach'),
+                  onMouseDown: (event) => event.preventDefault(),
+                  onClick: () => attachInputRef.current?.click(),
+                },
+                  h('svg', {
+                    width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none',
+                    stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', 'aria-hidden': 'true',
+                  }, h('path', { d: 'M8 3.2v9.6M3.2 8h9.6' }))),
+                h('div', { className: 'clipchat-card__ta-wrap' },
+                  h('textarea', {
+                    ref: textareaRef,
+                    className: 'clipchat-card__ta',
+                    rows: 1,
+                    value: draft,
+                    placeholder: files.length > 0 || snippets.length > 0
+                      ? translate('placeholderWithFiles')
+                      : translate('placeholder'),
+                    title: translate('inputHint'),
+                    onChange: (event) => setDraft(event.target.value),
+                    onKeyDown,
+                    onPaste,
+                  }))),
               h('button', {
                 type: 'button',
-                className: 'clipchat-card__attach',
-                'aria-label': translate('attach'),
-                title: translate('attach'),
+                className: 'clipchat-card__send',
+                'aria-label': streaming ? translate('stop') : translate('send'),
+                title: streaming ? translate('stop') : translate('send'),
+                disabled: streaming ? false : (draft.trim().length === 0 && files.length === 0 && snippets.length === 0),
                 onMouseDown: (event) => event.preventDefault(),
-                onClick: () => attachInputRef.current?.click(),
+                onClick: streaming ? () => controllerRef.current?.abort() : () => void send(),
+              }, streaming ? '■' : '↑')),
+            h('input', {
+              ref: attachInputRef,
+              type: 'file',
+              multiple: true,
+              style: { display: 'none' },
+              onChange: (event) => {
+                addFiles(event.target.files)
+                event.target.value = ''
+                textareaRef.current?.focus?.()
               },
-                h('svg', {
-                  width: 12, height: 12, viewBox: '0 0 16 16', fill: 'none',
-                  stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', 'aria-hidden': 'true',
-                }, h('path', { d: 'M8 3.2v9.6M3.2 8h9.6' }))),
-              h('div', { className: 'clipchat-card__ta-wrap' },
-                h('textarea', {
-                  ref: textareaRef,
-                  className: 'clipchat-card__ta',
-                  rows: 1,
-                  value: draft,
-                  placeholder: files.length > 0 || snippets.length > 0
-                    ? translate('placeholderWithFiles')
-                    : translate('placeholder'),
-                  title: translate('inputHint'),
-                  onChange: (event) => setDraft(event.target.value),
-                  onKeyDown,
-                  onPaste,
-                }))),
-            h('button', {
-              type: 'button',
-              className: 'clipchat-card__send',
-              'aria-label': streaming ? translate('stop') : translate('send'),
-              title: streaming ? translate('stop') : translate('send'),
-              disabled: streaming ? false : (draft.trim().length === 0 && files.length === 0 && snippets.length === 0),
-              onMouseDown: (event) => event.preventDefault(),
-              onClick: streaming ? () => controllerRef.current?.abort() : () => void send(),
-            }, streaming ? '■' : '↑')),
-          h('input', {
-            ref: attachInputRef,
-            type: 'file',
-            multiple: true,
-            style: { display: 'none' },
-            onChange: (event) => {
-              addFiles(event.target.files)
-              event.target.value = ''
-              textareaRef.current?.focus?.()
-            },
-          })),
-
-        detailStrip,
+            })),
+          detailStrip,
+          detailPopup),
 
         h('div', { className: 'clipchat-card__footer' },
           h('div', { className: 'clipchat-card__modelwrap' },

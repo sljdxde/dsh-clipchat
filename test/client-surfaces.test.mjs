@@ -176,6 +176,23 @@ test('the detail strip starts off and shows the recent-turn readout', async () =
   })
 })
 
+test('the injected-now popover opens above the composer, not over it', async () => {
+  globalThis.fetch = answerFetch()
+  await withCard(async ({ container }) => {
+    const block = container.querySelector('.clipchat-card__bottom')
+    const popover = container.querySelector('.clipchat-strip__detail')
+    assert.ok(block, 'the composer block exists')
+    assert.ok(popover, 'the popover rendered')
+    // A popover nested in the strip opened upward over the composer row and
+    // swallowed the click meant for the textarea. Anchored to the block, it
+    // opens over the thread above the input instead.
+    assert.equal(popover.parentElement, block, 'the popover is a sibling of the strip')
+    assert.equal(container.querySelector('.clipchat-strip .clipchat-strip__detail'), null)
+    assert.ok(block.contains(container.querySelector('.clipchat-card__composer')), 'the input shares the block')
+    assert.equal(popover.getAttribute('role'), 'tooltip')
+  })
+})
+
 test('turning detailed mode on reads the digest and shows the full history', async () => {
   globalThis.fetch = answerFetch({
     digest: {

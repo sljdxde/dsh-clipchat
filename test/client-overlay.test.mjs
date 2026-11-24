@@ -223,6 +223,28 @@ test('ensureStyle injects one style tag and only once', async () => {
   })
 })
 
+test('the strip detail never takes the pointer', async () => {
+  await withDom('', (t, env) => {
+    t.ensureStyle()
+    const css = env.document.querySelector('style[data-plugin="dsh-clipchat"]').textContent
+    // The popover opens upward over the composer row. Giving it the pointer made
+    // it keep itself hovered, so the click meant for the textarea landed on the
+    // popover and the next question could never be typed.
+    const own = css.split('}').find((rule) => rule.trimStart().startsWith('.clipchat-strip__detail{'))
+    assert.ok(own, 'the popover still has its own rule')
+    assert.ok(own.includes('pointer-events:none'), 'it lets the pointer through')
+    for (const rule of css.split('}')) {
+      if (!rule.includes('.clipchat-strip__detail')) continue
+      assert.equal(rule.includes('pointer-events:auto'), false, rule.trim().slice(0, 80))
+    }
+    // The popover is anchored to the composer block, so it opens above the input.
+    assert.ok(
+      css.includes('.clipchat-card__bottom{position:relative'),
+      'the composer block anchors the popover',
+    )
+  })
+})
+
 /* --- apply() registration --- */
 
 /** A context stub recording what `apply()` registers. */
